@@ -1,0 +1,16 @@
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+.temp/
+output/
+models/
+eval_results/
+*.mp4
+*.log
+router_stats.json
+audio_*.txt
+eval_dataset.yaml
+ragflow-docker/.env
+ragflow-docker/ragflow-logs/
+*.bak.*

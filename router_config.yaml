@@ -1,0 +1,485 @@
+server:
+  host: 0.0.0.0
+  port: 8606
+  stats_file: router_stats.json
+  health_check_interval: 30
+  request_timeout: 200
+lifecycle:
+  enabled: true
+  idle_check_interval: 60
+  default_idle_timeout: 600
+  startup_check_interval: 10
+  startup_timeout: 300
+  startup_grace: 300
+models:
+  qwen2.5-72b-local:
+    api_type: openai
+    base_url: http://localhost:8082/v1
+    model_name: mlx-community/Qwen2.5-72B-Instruct-4bit
+    api_key: EMPTY
+    priority: 2
+    max_tokens: 4096
+    context_window: 32768
+    tags:
+    - high-quality
+    - code
+    - reasoning
+    - math
+    - long-context
+    speed: slow
+    quality: highest
+    cost: local
+    description: 本地Qwen2.5-72B-4bit，最高质量但速度慢(4tok/s)，模型已删除，端口让给Qwen3.8常驻
+    enabled: false
+    auto_start: false
+    idle_timeout: 1800
+    startup_cmd: ''
+    shutdown_cmd: pkill -f 'mlx_lm.server.*Qwen2.5-72B-Instruct'
+  gemma4-12b-ollama:
+    api_type: ollama
+    base_url: http://localhost:11434
+    model_name: gemma4:12b
+    api_key: ''
+    priority: 3
+    max_tokens: 4096
+    context_window: 8192
+    tags:
+    - fast
+    - chat
+    - translate
+    - short
+    speed: fastest
+    quality: medium
+    cost: local
+    description: 本地Gemma4-12B(Ollama)，最快响应，适合短消息闲聊/翻译
+    enabled: true
+    auto_start: false
+    idle_timeout: 600
+    startup_cmd: ''
+    shutdown_cmd: ollama stop gemma4:12b
+  qwen2.5-vl-32b-local:
+    api_type: openai
+    base_url: http://localhost:8081/v1
+    model_name: mlx-community/Qwen2.5-VL-32B-Instruct-4bit
+    api_key: EMPTY
+    priority: 1
+    max_tokens: 4096
+    context_window: 32768
+    tags:
+    - vision
+    - image
+    - ocr
+    - vlm
+    speed: slow
+    quality: high
+    cost: local
+    description: 本地Qwen2.5-VL-32B，图片理解/OCR专用，VLM基准测试22.91s/图
+    enabled: true
+    auto_start: true
+    idle_timeout: 1800
+    startup_cmd: launchctl kickstart gui/$(id -u)/com.local-ai-factory.vision
+    shutdown_cmd: pkill -f 'mlx_lm.server.*Qwen2.5-VL-32B'
+  gemma4-26b-moe:
+    api_type: openai
+    base_url: http://localhost:8083/v1
+    model_name: （模型已删除）
+    api_key: EMPTY
+    priority: 1
+    max_tokens: 8192
+    context_window: 131072
+    tags:
+    - default
+    - general
+    - code
+    - reasoning
+    - long-context
+    - moe
+    speed: fast
+    quality: high
+    cost: local
+    description: 本地Gemma4-26B-MoE(bf16)，模型已删除，禁用
+    enabled: false
+    auto_start: false
+    idle_timeout: 1200
+    startup_cmd: ''
+    shutdown_cmd: pkill -f 'mlx_lm.server.*8083'
+  qwen3.6-35b-moe:
+    api_type: openai
+    base_url: http://localhost:8084/v1
+    model_name: /Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/Qwen3.6-35B-A3B-bf16
+    api_key: EMPTY
+    priority: 2
+    max_tokens: 8192
+    context_window: 131072
+    tags:
+    - code
+    - reasoning
+    - math
+    - moe
+    - long-context
+    speed: fast
+    quality: high
+    cost: local
+    description: 本地Qwen3.6-35B-MoE(bf16 65GB)，总35B激活3B，代码/推理强，128K上下文，基准测试平均30.8 tps
+    enabled: true
+    auto_start: true
+    idle_timeout: 1800
+    startup_cmd: /opt/homebrew/bin/python3.11 -m mlx_lm.server --model /Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/Qwen3.6-35B-A3B-bf16
+      --host 0.0.0.0 --port 8084
+    shutdown_cmd: pkill -f 'mlx_lm.server.*8084'
+  telechat3-36b-thinking:
+    api_type: openai
+    base_url: http://localhost:8086/v1
+    model_name: /Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/TeleChat3-36B-Thinking-4bit
+    api_key: EMPTY
+    priority: 3
+    max_tokens: 8192
+    context_window: 32768
+    tags:
+    - chinese
+    - reasoning
+    - thinking
+    - telecom
+    speed: medium
+    quality: high
+    cost: local
+    description: 本地TeleChat3-36B-Thinking(4bit)，电信星辰自研，带思维链，中文适配好
+    enabled: true
+    auto_start: true
+    idle_timeout: 1200
+    startup_cmd: /opt/homebrew/bin/python3.11 -m mlx_lm.server --model /Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/TeleChat3-36B-Thinking-4bit
+      --host 0.0.0.0 --port 8086 --trust-remote-code
+    shutdown_cmd: pkill -f 'mlx_lm.server.*8086'
+  qwen3.8-27b-local:
+    api_type: openai
+    base_url: http://localhost:8085/v1
+    model_name: /Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/Qwen3.8-27B-4bit
+    api_key: EMPTY
+    priority: 2
+    max_tokens: 8192
+    context_window: 131072
+    tags:
+    - default
+    - general
+    - code
+    - reasoning
+    - lightweight
+    speed: fast
+    quality: high
+    cost: local
+    description: 本地Qwen3.8-27B-4bit(15GB)，轻量主力，速度快质量好，默认首选，基准测试平均31.5 tps
+    enabled: true
+    auto_start: true
+    idle_timeout: 1800
+    startup_cmd: /opt/homebrew/bin/python3.11 -m mlx_lm.server --model /Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/Qwen3.8-27B-4bit
+      --host 0.0.0.0 --port 8085
+    shutdown_cmd: pkill -f 'mlx_lm.server.*8085'
+  gemma4-31b-dense:
+    api_type: openai
+    base_url: http://localhost:8087/v1
+    model_name: （模型已删除）
+    api_key: EMPTY
+    priority: 4
+    max_tokens: 8192
+    context_window: 131072
+    tags:
+    - high-quality
+    - reasoning
+    - long-context
+    - dense
+    - thinking
+    speed: slow
+    quality: highest
+    cost: local
+    description: 本地Gemma4-31B-Dense(bf16)，模型已删除，禁用
+    enabled: false
+    auto_start: false
+    idle_timeout: 1800
+    startup_cmd: ''
+    shutdown_cmd: pkill -f 'mlx_lm.server.*8087'
+  gemma4-12b-mlx:
+    api_type: openai
+    base_url: http://localhost:8088/v1
+    model_name: mlx-community/gemma-4-12B-8bit
+    api_key: EMPTY
+    priority: 3
+    max_tokens: 4096
+    context_window: 131072
+    tags:
+    - fast
+    - chat
+    - translate
+    - short
+    - lightweight
+    speed: fast
+    quality: medium
+    cost: local
+    description: 本地Gemma4-12B(8bit MLX)，MLX下中文不可用，禁用
+    enabled: false
+    auto_start: false
+    idle_timeout: 600
+    startup_cmd: ''
+    shutdown_cmd: pkill -f 'mlx_lm.server.*8088'
+  qwen3.8-27b-resident:
+    api_type: openai
+    base_url: http://localhost:8082/v1
+    model_name: /Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/Qwen3.8-27B-4bit
+    api_key: EMPTY
+    priority: 1
+    max_tokens: 8192
+    context_window: 131072
+    tags:
+    - default
+    - general
+    - code
+    - reasoning
+    - resident
+    - lightweight
+    speed: fast
+    quality: high
+    cost: local
+    description: 本地Qwen3.8-27B-4bit常驻服务(launchd托管,端口8082)，启动即用无需按需加载
+    enabled: true
+    auto_start: true
+    idle_timeout: 0
+    startup_cmd: launchctl kickstart gui/$(id -u)/com.local-ai-factory.llm
+    shutdown_cmd: ''
+  qwen3.6-27b-remote:
+    api_type: openai
+    base_url: http://106.0.4.142:51211/v1
+    model_name: qwen3.6-27b
+    api_key: sk-c8ebae3396d444f55dab24b383bd40048455be2ee84bb3f751504e41026437ee
+    priority: 1
+    max_tokens: 8192
+    context_window: 32768
+    tags:
+    - default
+    - general
+    - code
+    - reasoning
+    - long-context
+    speed: fast
+    quality: high
+    cost: free
+    description: 远程Qwen3.6-27B，武林提供，质量好速度快，默认首选降级
+    enabled: true
+  # ── ComfyUI 多模态模型 ──
+  sdxl-image-gen:
+    api_type: comfyui
+    base_url: http://localhost:8189
+    model_name: SDXL Base 1.0
+    api_key: ''
+    priority: 1
+    max_tokens: 0
+    context_window: 0
+    tags:
+    - image-gen
+    - sdxl
+    - diffusion
+    speed: medium
+    quality: high
+    cost: local
+    description: 本地SDXL文生图，1024x1024分辨率，20步生成，CheckpointLoaderSimple+EmptyLatentImage(4ch)
+    enabled: true
+    auto_start: false
+    idle_timeout: 0
+    startup_cmd: launchctl kickstart gui/$(id -u)/com.local-ai-factory.comfyui
+    shutdown_cmd: ''
+  sana-image-gen:
+    api_type: comfyui
+    base_url: http://localhost:8189
+    model_name: SANA 1.5 1.6B
+    api_key: ''
+    priority: 2
+    max_tokens: 0
+    context_window: 0
+    tags:
+    - image-gen
+    - sana
+    - diffusion
+    speed: slow
+    quality: high
+    cost: local
+    description: 本地SANA 1.5文生图，1024x1024分辨率，20步FP32，需GemmaLoader本地化(已修复)，EmptySanaLatentImage(32ch)
+    enabled: true
+    auto_start: false
+    idle_timeout: 0
+    startup_cmd: launchctl kickstart gui/$(id -u)/com.local-ai-factory.comfyui
+    shutdown_cmd: ''
+  minimax-h3-video:
+    api_type: comfyui
+    base_url: http://localhost:8189
+    model_name: MiniMax H3
+    api_key: ''
+    priority: 1
+    max_tokens: 0
+    context_window: 0
+    tags:
+    - video-gen
+    - minimax
+    - diffusion
+    speed: slow
+    quality: high
+    cost: local
+    description: 本地MiniMax H3视频生成，864x480 5秒24fps，Turbo 4 Fast+SolAttn，1.3GB
+    enabled: true
+    auto_start: false
+    idle_timeout: 0
+    startup_cmd: launchctl kickstart gui/$(id -u)/com.local-ai-factory.comfyui
+    shutdown_cmd: ''
+  cosyvoice-tts:
+    api_type: custom
+    base_url: ''
+    model_name: CosyVoice3-0.5B
+    api_key: ''
+    priority: 1
+    max_tokens: 0
+    context_window: 0
+    tags:
+    - tts
+    - voice
+    - audio
+    speed: fast
+    quality: high
+    cost: local
+    description: 本地CosyVoice3-0.5B零样本音色克隆TTS，RTF=1.123接近实时，MPS上需强制FP32(已修复)
+    enabled: true
+    auto_start: false
+    idle_timeout: 0
+    startup_cmd: ''
+    shutdown_cmd: ''
+  funasr-asr:
+    api_type: custom
+    base_url: ''
+    model_name: SenseVoiceSmall + Fun-ASR-Nano
+    api_key: ''
+    priority: 1
+    max_tokens: 0
+    context_window: 0
+    tags:
+    - asr
+    - voice
+    - audio
+    speed: fast
+    quality: high
+    cost: local
+    description: 本地FunASR语音识别，SenseVoiceSmall(CPU 0.78s极速)+Fun-ASR-Nano(MPS 3.71s)
+    enabled: true
+    auto_start: false
+    idle_timeout: 0
+    startup_cmd: ''
+    shutdown_cmd: ''
+  bge-large-zh-embedding:
+    api_type: ollama
+    base_url: http://localhost:11434
+    model_name: bge-large-zh
+    api_key: ''
+    priority: 1
+    max_tokens: 0
+    context_window: 0
+    tags:
+    - embedding
+    - vector
+    - semantic
+    speed: fast
+    quality: high
+    cost: local
+    description: 本地bge-large-zh向量嵌入(1024维)via Ollama，语义区分度良好(相关>0.86/不相关<0.67)
+    enabled: true
+    auto_start: false
+    idle_timeout: 0
+    startup_cmd: ''
+    shutdown_cmd: ''
+routing_rules:
+- name: explicit-model
+  match_type: explicit
+  description: 请求中显式指定了模型名，直接路由
+- name: vision-request
+  match_type: vision
+  target: qwen2.5-vl-32b-local
+  fallback:
+  - qwen3.8-27b-local
+  - qwen3.6-35b-moe
+  description: 图片理解请求路由到视觉模型
+- name: code-task
+  match_type: keyword
+  keywords:
+  - 代码
+  - code
+  - 函数
+  - function
+  - bug
+  - 调试
+  - debug
+  - 编程
+  - program
+  - 脚本
+  - script
+  - 算法
+  - algorithm
+  - python
+  - javascript
+  - java
+  - rust
+  - go语言
+  - SQL
+  - 正则
+  - regex
+  - API接口
+  - 重构
+  - refactor
+  target: qwen3.8-27b-local
+  fallback:
+  - qwen3.6-27b-remote
+  - qwen3.6-35b-moe
+  description: 代码任务→Qwen3.8(快+强)，远程降级不占内存
+- name: reasoning-task
+  match_type: keyword
+  keywords:
+  - 推理
+  - reasoning
+  - 证明
+  - prove
+  - 数学
+  - math
+  - 逻辑
+  - logic
+  - 分析
+  - analyze
+  - 计算
+  - calculate
+  - 概率
+  - 统计
+  - 最优
+  - 优化
+  - optimize
+  target: qwen3.6-35b-moe
+  fallback:
+  - telechat3-36b-thinking
+  - qwen3.8-27b-local
+  - qwen3.6-27b-remote
+  description: 推理/数学→Qwen3.6-MoE，TeleChat3降级，Qwen3.8兜底
+- name: short-chat
+  match_type: length
+  max_tokens: 200
+  target: gemma4-12b-ollama
+  fallback:
+  - qwen3.8-27b-local
+  - qwen3.6-27b-remote
+  description: 短消息(≤200token)→Ollama最快，Qwen3.8降级
+- name: long-context
+  match_type: length
+  min_tokens: 4000
+  target: qwen3.8-27b-local
+  fallback:
+  - qwen3.6-35b-moe
+  - telechat3-36b-thinking
+  description: 长文本(≥4000token)→Qwen3.8 128K上下文
+- name: default
+  match_type: default
+  target: qwen3.8-27b-local
+  fallback:
+  - qwen3.6-27b-remote
+  - qwen3.6-35b-moe
+  - gemma4-12b-ollama
+  description: 默认→Qwen3.8主力，远程降级不占内存，Ollama兜底

@@ -1,0 +1,137 @@
+{
+  "enabled": true,
+  "last_learn_time": "2026-07-27T15:52:33.141584",
+  "learn_count": 2,
+  "strategies": {
+    "explicit-model": {
+      "rule_name": "explicit-model",
+      "original_target": "",
+      "original_fallback": [],
+      "optimized_target": "",
+      "optimized_fallback": [],
+      "changed": false,
+      "model_scores": {},
+      "learn_time": "",
+      "data_points": 0
+    },
+    "vision-request": {
+      "rule_name": "vision-request",
+      "original_target": "qwen2.5-vl-32b-local",
+      "original_fallback": [
+        "qwen2.5-72b-local"
+      ],
+      "optimized_target": "qwen2.5-vl-32b-local",
+      "optimized_fallback": [
+        "qwen2.5-72b-local"
+      ],
+      "changed": false,
+      "model_scores": {},
+      "learn_time": "",
+      "data_points": 0
+    },
+    "code-task": {
+      "rule_name": "code-task",
+      "original_target": "qwen3.6-27b-remote",
+      "original_fallback": [
+        "qwen2.5-72b-local",
+        "gemma4-12b-ollama"
+      ],
+      "optimized_target": "qwen3.6-27b-remote",
+      "optimized_fallback": [
+        "gemma4-12b-ollama",
+        "qwen2.5-72b-local"
+      ],
+      "changed": true,
+      "model_scores": {
+        "qwen3.6-27b-remote": {
+          "total": 89.0,
+          "quality": 100.0,
+          "efficiency": 80,
+          "cost": 100,
+          "stability": 50.0,
+          "requests": 2,
+          "success_rate": 50.0,
+          "avg_latency": 39.19
+        },
+        "gemma4-12b-ollama": {
+          "total": 71.0,
+          "quality": 67.5,
+          "efficiency": 60,
+          "cost": 80,
+          "stability": 100.0,
+          "requests": 2,
+          "success_rate": 100.0,
+          "avg_latency": 60.67
+        }
+      },
+      "learn_time": "2026-07-27T15:52:33.141509",
+      "data_points": 4
+    },
+    "reasoning-task": {
+      "rule_name": "reasoning-task",
+      "original_target": "qwen2.5-72b-local",
+      "original_fallback": [
+        "qwen3.6-27b-remote",
+        "gemma4-12b-ollama"
+      ],
+      "optimized_target": "qwen2.5-72b-local",
+      "optimized_fallback": [
+        "qwen3.6-27b-remote",
+        "gemma4-12b-ollama"
+      ],
+      "changed": false,
+      "model_scores": {},
+      "learn_time": "",
+      "data_points": 0
+    },
+    "short-chat": {
+      "rule_name": "short-chat",
+      "original_target": "gemma4-12b-ollama",
+      "original_fallback": [
+        "qwen3.6-27b-remote"
+      ],
+      "optimized_target": "gemma4-12b-ollama",
+      "optimized_fallback": [
+        "qwen3.6-27b-remote"
+      ],
+      "changed": false,
+      "model_scores": {
+        "gemma4-12b-ollama": 83.0
+      },
+      "learn_time": "",
+      "data_points": 4
+    },
+    "long-context": {
+      "rule_name": "long-context",
+      "original_target": "qwen3.6-27b-remote",
+      "original_fallback": [
+        "qwen2.5-72b-local"
+      ],
+      "optimized_target": "qwen3.6-27b-remote",
+      "optimized_fallback": [
+        "qwen2.5-72b-local"
+      ],
+      "changed": false,
+      "model_scores": {},
+      "learn_time": "",
+      "data_points": 0
+    },
+    "default": {
+      "rule_name": "default",
+      "original_target": "qwen3.6-27b-remote",
+      "original_fallback": [
+        "qwen2.5-72b-local",
+        "gemma4-12b-ollama"
+      ],
+      "optimized_target": "qwen3.6-27b-remote",
+      "optimized_fallback": [
+        "qwen2.5-72b-local",
+        "gemma4-12b-ollama"
+      ],
+      "changed": false,
+      "model_scores": {},
+      "learn_time": "",
+      "data_points": 0
+    }
+  }
+}
