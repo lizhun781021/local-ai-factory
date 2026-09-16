@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'd98df0fa-9940-4eb8-abe1-1e317d1d705e'
-  PropagateID: 'd98df0fa-9940-4eb8-abe1-1e317d1d705e'
-  ReservedCode1: 'e8608218-f394-4d3e-9d44-a8bc02cc7200'
-  ReservedCode2: 'e8608218-f394-4d3e-9d44-a8bc02cc7200'
+  ProduceID: '92ec66a2-f827-4d82-be7d-16eae325177f'
+  PropagateID: '92ec66a2-f827-4d82-be7d-16eae325177f'
+  ReservedCode1: '236b5d30-8d06-47da-8b69-65ba63e8c2f7'
+  ReservedCode2: '236b5d30-8d06-47da-8b69-65ba63e8c2f7'
 ---
 
 # 📋 更新日志
@@ -16,6 +16,27 @@ AIGC:
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 版本标签格式：`v{版本号}`
+
+---
+
+## [2.2.0] - 2026-09-16
+
+### 🚀 公网访问 + 页面内登录 + 移动端自适应
+
+#### 新增
+- 公网访问：手机浏览器直接访问 AI 工厂（http://219.151.184.206:8500），算力仍在本地 Mac（SSH 反向隧道 + nginx 反代 + WebSocket 升级）
+- 页面内密码登录：webui.py 内置登录门（`AUTH_PASSWORD` 变量，默认 lz781021，可用环境变量 `AI_FACTORY_PASSWORD` 覆盖），未登录仅显示登录页；nginx 已移除 Basic Auth，不再依赖浏览器弹框
+- 移动端自适应：≤768px 屏幕多列布局自动单列堆叠、标题字号缩放、按钮全宽、侧边栏抽屉化（290px）且长文本自动换行，无横向滚动
+- 运维备忘：`AI工厂公网访问备忘.html`（访问地址、架构链路、修改密码、隧道故障排查）
+
+#### 更新
+- WebUI 启动参数：增加 `--server.enableCORS false --server.enableXsrfProtection false`（公网反代必需，否则公网 WebSocket 被 403 拦截）
+- 技能文档 v2.2.0：local-ai-factory 技能新增「公网访问（手机/远程）」章节与故障排查
+- rag_sync.py：同名不同内容文件按 MD5 分组，非主版本用【父目录】前缀命名，避免知识库因同名丢内容
+
+#### 修复
+- 公网页面白屏：Streamlit 默认 CORS/XSRF 校验 Origin，导致公网 WebSocket 请求 403，页面停留加载状态
+- 隧道僵死：SSH 反向转发 CLOSE_WAIT 堆积导致公网转发超时，固化清理流程（重启 autossh + 云端释放端口）
 
 ---
 

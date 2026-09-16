@@ -107,9 +107,9 @@ def get_dataset_docs():
     return all_docs
 
 
-def upload_doc(filepath):
-    """上传单个文件"""
-    fname = os.path.basename(filepath)
+def upload_doc(filepath, display_name=None):
+    """上传单个文件，display_name 为 RAGFlow 中的文档名称"""
+    fname = display_name or os.path.basename(filepath)
     r = api_request("POST", f"/datasets/{DATASET_ID}/documents", files={"file": (fname, filepath)})
     if r.get("code") != 0:
         return None, f"上传失败: {r.get('message', r.get('error', ''))}"
@@ -216,30 +216,75 @@ def sync(dry_run=False, verbose=False):
         import re
         return re.sub(r"\(\d+\)(?=\.)", "", fname)
 
-    # 本地文件按文件名索引（同名多目录时取 mtime 最新的那个）
-    # 注意：只登记真实文件名，绝不用归一化名称覆盖，避免误判
-    local_by_name = {}   # name -> info（同名取 mtime 最新）
+    # 3. 本地文件去重与命名
+    #    规则：
+    #    - 同名同内容（MD5一致）→ 视为真正的副本，只保留 mtime 最新的一份
+    #    - 同名不同内容（MD5不同）→ 都保留，非主版本用「【父目录】文件名」命名
+    #    这样知识库能覆盖所有不同内容的版本，不会因为同名而丢内容
+    from collections import defaultdict
+    by_fname = defaultdict(list)  # filename -> [(rel, info)]
     for rel, info in local_files.items():
         fname = os.path.basename(rel)
-        if fname not in local_by_name or info["mtime"] > local_by_name[fname]["mtime"]:
-            local_by_name[fname] = info
+        by_fname[fname].append((rel, info))
 
-    # 3. 比对：遍历本地文件（以真实文件名为准）
-    for fname, info in sorted(local_by_name.items()):
-        exact_doc = remote_by_name.get(fname)
+    local_entries = {}  # display_name -> {path, size, mtime, rel}
+    for fname, entries in by_fname.items():
+        if len(entries) == 1:
+            rel, info = entries[0]
+            local_entries[fname] = {**info, "rel": rel}
+        else:
+            # 同名多文件：按 MD5 分组
+            md5_groups = defaultdict(list)
+            for rel, info in entries:
+                h = file_md5(info["path"])
+                md5_groups[h or str(id(info))].append((rel, info))
+
+            if len(md5_groups) == 1:
+                # 内容完全相同 → 只保留最新版
+                group = list(md5_groups.values())[0]
+                best = max(group, key=lambda x: x[1]["mtime"])
+                local_entries[fname] = {**best[1], "rel": best[0]}
+            else:
+                # 内容不同 → 各保留最新版，用【父目录】前缀区分
+                all_variants = []
+                for h, group in md5_groups.items():
+                    best = max(group, key=lambda x: x[1]["mtime"])
+                    all_variants.append((best[0], best[1]))
+                # 按 mtime 降序：最新版用原文件名，其余加前缀
+                all_variants.sort(key=lambda x: x[1]["mtime"], reverse=True)
+
+                used_names = set()
+                for i, (rel, info) in enumerate(all_variants):
+                    if i == 0:
+                        display_name = fname
+                    else:
+                        parent = os.path.basename(os.path.dirname(rel)) or "root"
+                        display_name = f"【{parent}】{fname}"
+                        counter = 2
+                        while display_name in used_names:
+                            display_name = f"【{parent}{counter}】{fname}"
+                            counter += 1
+                    used_names.add(display_name)
+                    local_entries[display_name] = {**info, "rel": rel}
+
+    log(f"去重后本地条目数: {len(local_entries)}（同名去重 {len(local_files) - len(local_entries)} 个）")
+
+    # 4. 比对：遍历本地条目（以 display_name 为准）
+    for dname, info in sorted(local_entries.items()):
+        exact_doc = remote_by_name.get(dname)
         if exact_doc is not None:
-            # 远程存在完全同名文件 → 比较 size（RAGFlow 的 content_hash 字段为空，只能以 size 为准）
+            # 远程存在同名文档 → 比较 size
             remote_size = exact_doc.get("size", 0)
             if remote_size != info["size"] and remote_size > 0:
-                to_update.append((fname, info))  # 内容确实变了 → 删旧传新
+                to_update.append((dname, info))  # 内容确实变了 → 删旧传新
             # size 相同视为未变化，跳过
         else:
-            to_upload.append((fname, info))  # 远程无同名 → 新增
+            to_upload.append((dname, info))  # 远程无同名 → 新增
 
-# 4. 遍历远程文档，找出需要删除的：
+# 5. 遍历远程文档，找出需要删除的：
     #    - 本地已不存在的文件（用户删除）
     #    - 远程 (N) 副本：仅当本地存在对应的**真实主文件**时才删除冗余副本。
-    #      若用户本地文件名本身就带 (N)（如 xxx(1).xlsx），则该文件已被第 3 步按
+    #      若用户本地文件名本身就带 (N)（如 xxx(1).xlsx），则该文件已被第 4 步按
     #      真实文件名处理（视为独立文件），绝不会作为"副本"删除。
     #      同时用 seen 集合防止同一副本被重复加入删除列表（同 ID 二次删除会报 402）。
     import re
@@ -247,19 +292,19 @@ def sync(dry_run=False, verbose=False):
     for name, doc in remote_by_name.items():
         if name.startswith(tuple(SKIP_PREFIXES)):
             continue
-        if name in local_by_name:
-            continue  # 已在第 3 步处理
+        if name in local_entries:
+            continue  # 已在第 4 步处理
         if doc["id"] in seen_ids:
             continue  # 去重：避免同一 ID 重复删除
         base = norm_name(name)
-        if base in local_by_name and name != base:
-            # 远程是 (N) 副本，且本地存在真实主文件 → 删除冗余副本
+        if base in local_entries and name != base:
+            # 远程是 (N) 副本，且本地存在对应主文件 → 删除冗余副本
             to_delete.append((name, doc["id"]))
             seen_ids.add(doc["id"])
-        elif re.search(r"\(\d+\)\.", name) and base not in local_by_name:
+        elif re.search(r"\(\d+\)\.", name) and base not in local_entries:
             # 远程 (N) 版本，本地也没有对应主文件 → 保守保留，仅提示
             log(f"  ℹ️ 远程 (N) 版本 {name} 在本地无对应源文件，保留不处理")
-        elif name not in local_by_name:
+        elif name not in local_entries:
             # 本地没有对应文件 → 本地已删除，同步删除
             to_delete.append((name, doc["id"]))
             seen_ids.add(doc["id"])
@@ -307,7 +352,7 @@ def sync(dry_run=False, verbose=False):
 
     # 上传新增
     for name, info in to_upload:
-        doc_id, err = upload_doc(info["path"])
+        doc_id, err = upload_doc(info["path"], display_name=name)
         if not doc_id:
             results["failed"].append((name, err))
             log(f"  ❌ 上传失败 {name}: {err}")
@@ -330,7 +375,7 @@ def sync(dry_run=False, verbose=False):
                 results["failed"].append((name, f"删除旧版本失败: {err}"))
                 log(f"  ❌ 修改失败 {name}: {err}")
                 continue
-        doc_id, err = upload_doc(info["path"])
+        doc_id, err = upload_doc(info["path"], display_name=name)
         if not doc_id:
             results["failed"].append((name, err))
             log(f"  ❌ 上传失败 {name}: {err}")

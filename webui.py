@@ -71,6 +71,75 @@ def log_activity(action, detail="", status="ok", duration=None):
             f.write(line + "\n")
     except:
         pass
+
+# ==================== 文件路径自动修复 ====================
+WORK_DIR = os.path.expanduser("~/Desktop/工作")
+FTS_BUILD_SCRIPT = os.path.expanduser("~/Desktop/星小辰工作空间/work-knowledge-base/build_fts_index.py")
+_fts_rebuild_lock = {"last_run": 0}  # 防止频繁重建（至少间隔60秒）
+
+def resolve_file_path(doc_name):
+    """
+    查找文件的真实本地路径，支持自动修复：
+    1. 先从 FTS 数据库查 file_path
+    2. 路径失效时自动触发增量重建索引
+    3. 重建后再次查询
+    4. 仍然找不到时全盘搜索兜底
+    返回: (path, source) 或 (None, None)
+    """
+    if not os.path.exists(FTS_DB_PATH):
+        return None, None
+
+    # Step 1: 从 FTS 数据库查
+    def _query_fts(name):
+        try:
+            conn = sqlite3.connect(FTS_DB_PATH)
+            cur = conn.cursor()
+            cur.execute("SELECT file_path FROM files WHERE file_name = ? LIMIT 1", (name,))
+            row = cur.fetchone()
+            conn.close()
+            return row[0] if row else None
+        except:
+            return None
+
+    db_path = _query_fts(doc_name)
+    if db_path and os.path.exists(db_path):
+        return db_path, "fts_db"
+
+    # Step 2: 路径失效或不存在 → 触发增量重建（节流60秒）
+    now = time.time()
+    if now - _fts_rebuild_lock["last_run"] > 60:
+        _fts_rebuild_lock["last_run"] = now
+        try:
+            subprocess.run(
+                ["python3", FTS_BUILD_SCRIPT],
+                capture_output=True, timeout=120,
+                cwd=os.path.dirname(FTS_BUILD_SCRIPT)
+            )
+        except:
+            pass
+        # Step 3: 重建后重新查
+        db_path = _query_fts(doc_name)
+        if db_path and os.path.exists(db_path):
+            return db_path, "fts_rebuilt"
+
+    # Step 4: 全盘搜索兜底
+    for dirpath, dirnames, filenames in os.walk(WORK_DIR):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != ".Trash"]
+        if doc_name in filenames:
+            found = os.path.join(dirpath, doc_name)
+            # 顺便更新 FTS 数据库里的路径
+            try:
+                conn = sqlite3.connect(FTS_DB_PATH)
+                cur = conn.cursor()
+                cur.execute("UPDATE files SET file_path = ? WHERE file_name = ?", (found, doc_name))
+                conn.commit()
+                conn.close()
+            except:
+                pass
+            return found, "filesystem_search"
+
+    return None, None
+
 # 系统监控数据
 if "sys_history" not in st.session_state:
     st.session_state.sys_history = {
@@ -442,6 +511,8 @@ def generate_image_comfyui(prompt, model="sana", width=1024, height=1024, steps=
         latest_step = [0]
         ws_connected = [False]
         ws_error = [None]
+        ws_progress = [0, total_steps]  # [当前步, 总步数]
+        ws_status = ["loading_model"]   # 当前状态
 
         def on_ws():
             try:
@@ -454,15 +525,14 @@ def generate_image_comfyui(prompt, model="sana", width=1024, height=1024, steps=
                         break
                     if msg.get("type") == "progress":
                         d = msg.get("data", {})
-                        cur = d.get("value", 0)
-                        total = d.get("max", total_steps)
-                        latest_step[0] = cur
-                        if progress_callback:
-                            progress_callback(cur, total, "sampling")
+                        ws_progress[0] = d.get("value", 0)
+                        ws_progress[1] = d.get("max", total_steps)
+                        ws_status[0] = "sampling"
+                        latest_step[0] = ws_progress[0]
                     elif msg.get("type") == "executing" and msg.get("data", {}).get("node") is None:
                         # 执行完成
-                        if progress_callback:
-                            progress_callback(total_steps, total_steps, "done")
+                        ws_progress[0] = total_steps
+                        ws_status[0] = "done"
                         break
                     elif msg.get("type") == "execution_error":
                         ws_error[0] = msg.get("data", {}).get("exception_message", "执行错误")
@@ -477,11 +547,18 @@ def generate_image_comfyui(prompt, model="sana", width=1024, height=1024, steps=
         if progress_callback:
             progress_callback(0, total_steps, "loading_model")
 
-        # 轮询等待完成（同时 WebSocket 更新进度）
-        for _ in range(300):
+        # 根据模型动态设置超时：SANA 5分钟, SDXL 10分钟, Qwen-Image 15分钟
+        timeout_minutes = {"sana": 5, "sdxl": 10, "qwen_image": 15}.get(model, 5)
+        max_polls = timeout_minutes * 60  # 每1秒轮询一次
+
+        # 轮询等待完成（主线程同步更新进度）
+        for _ in range(max_polls):
             time.sleep(1)
             if ws_error[0]:
                 return None, f"生成错误: {ws_error[0]}"
+            # 主线程同步更新进度（Streamlit 子线程更新 UI 不可靠）
+            if progress_callback:
+                progress_callback(ws_progress[0], ws_progress[1], ws_status[0])
             try:
                 hist = requests.get(f"{comfy_url}/history/{prompt_id}", timeout=10).json()
             except:
@@ -498,7 +575,7 @@ def generate_image_comfyui(prompt, model="sana", width=1024, height=1024, steps=
                                 f.write(img_resp.content)
                             return local_path, None
                 return None, "ComfyUI 完成但无输出图片"
-        return None, "生成超时（5分钟）"
+        return None, f"生成超时（{timeout_minutes}分钟）"
     except requests.exceptions.ConnectionError:
         return None, "ComfyUI 未运行（端口 8188），请先启动 ComfyUI"
     except Exception as e:
@@ -600,6 +677,10 @@ def generate_video_comfyui(prompt, model_profile="attention16-mlp8-pruned",
     comfy_url = "http://localhost:8188"
     client_id = f"streamlit-{random.randint(10000,99999)}"
 
+    # MiniMax H3 要求宽高必须是 32 的倍数，做保护性对齐
+    width = (width // 32) * 32
+    height = (height // 32) * 32
+
     if seed == 0:
         seed = random.randint(1, 2**32 - 1)
 
@@ -665,6 +746,8 @@ def generate_video_comfyui(prompt, model_profile="attention16-mlp8-pruned",
         ws_url = f"ws://localhost:8188/ws?clientId={client_id}"
         ws_connected = [False]
         ws_error = [None]
+        ws_progress = [0, total_steps]  # [当前步, 总步数]
+        ws_status = ["loading_model"]  # 当前状态
 
         def on_ws():
             try:
@@ -677,13 +760,12 @@ def generate_video_comfyui(prompt, model_profile="attention16-mlp8-pruned",
                         break
                     if msg.get("type") == "progress":
                         d = msg.get("data", {})
-                        cur = d.get("value", 0)
-                        total = d.get("max", total_steps)
-                        if progress_callback:
-                            progress_callback(cur, total, "sampling")
+                        ws_progress[0] = d.get("value", 0)
+                        ws_progress[1] = d.get("max", total_steps)
+                        ws_status[0] = "sampling"
                     elif msg.get("type") == "executing" and msg.get("data", {}).get("node") is None:
-                        if progress_callback:
-                            progress_callback(total_steps, total_steps, "done")
+                        ws_progress[0] = total_steps
+                        ws_status[0] = "done"
                         break
                     elif msg.get("type") == "execution_error":
                         ws_error[0] = msg.get("data", {}).get("exception_message", "执行错误")
@@ -698,11 +780,18 @@ def generate_video_comfyui(prompt, model_profile="attention16-mlp8-pruned",
         if progress_callback:
             progress_callback(0, total_steps, "loading_model")
 
+        # 根据生成模式动态设置超时：Turbo 4 Fast 20分钟, Turbo 8 Balanced 30分钟, Full 20 Quality 45分钟
+        timeout_minutes = {"Turbo 4 Fast": 20, "Turbo 8 Balanced": 30, "Full 20 Quality": 45}.get(generation_profile, 20)
+        max_polls = timeout_minutes * 60 // 2  # 每2秒轮询一次
+
         # 轮询等待完成
-        for _ in range(600):
+        for _ in range(max_polls):
             time.sleep(2)
             if ws_error[0]:
                 return None, f"生成错误: {ws_error[0]}"
+            # 主线程同步更新进度（Streamlit 子线程更新 UI 不可靠）
+            if progress_callback:
+                progress_callback(ws_progress[0], ws_progress[1], ws_status[0])
             try:
                 hist = requests.get(f"{comfy_url}/history/{prompt_id}", timeout=10).json()
             except:
@@ -754,7 +843,7 @@ def generate_video_comfyui(prompt, model_profile="attention16-mlp8-pruned",
                 if video_path:
                     return video_path, None
                 return None, "ComfyUI 完成但无视频输出"
-        return None, "生成超时（20分钟）"
+        return None, f"生成超时（{timeout_minutes}分钟）"
     except requests.exceptions.ConnectionError:
         return None, "无法连接 ComfyUI（端口 8188），请确认服务已启动"
     except Exception as e:
@@ -773,6 +862,10 @@ def generate_image_to_video_local(image_path, prompt, duration=5.0,
     import json as _json
 
     os.makedirs(OUTPUT_VIDEO_GEN, exist_ok=True)
+
+    # MiniMax H3 要求宽高必须是 32 的倍数，做保护性对齐
+    width = (width // 32) * 32
+    height = (height // 32) * 32
 
     script_path = os.path.join(os.path.dirname(__file__), ".temp", "i2v_generate.py")
     if not os.path.exists(script_path):
@@ -905,61 +998,805 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 自定义样式
+# 读取版本号
+try:
+    with open(os.path.join(PROJECT_DIR, "VERSION"), "r") as _vf:
+        APP_VERSION = _vf.read().strip()
+except:
+    APP_VERSION = "unknown"
+
+# ==================== 公网访问登录门 ====================
+# 页面内密码登录（公网入口认证），可通过环境变量 AI_FACTORY_PASSWORD 修改
+AUTH_PASSWORD = os.environ.get("AI_FACTORY_PASSWORD", "lz781021")
+
+if not st.session_state.get("authed", False):
+    st.markdown("""
+    <style>
+    .auth-wrap { max-width: 380px; margin: 6vh auto 0 auto; padding: 40px 36px;
+                 background: #ffffff; border-radius: 16px; border: 1px solid #ececf1;
+                 box-shadow: 0 8px 32px rgba(0,0,0,0.06); text-align: center; }
+    .auth-icon { font-size: 48px; margin-bottom: 12px; }
+    .auth-title { font-size: 22px; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; }
+    .auth-sub { font-size: 13px; color: #8e8ea0; margin-bottom: 28px; }
+    </style>
+    """, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="auth-wrap"><div class="auth-icon">🏭</div>'
+        '<div class="auth-title">本地 AI 工厂</div>'
+        '<div class="auth-sub">请输入访问密码后使用</div></div>',
+        unsafe_allow_html=True
+    )
+    with st.form("auth_form"):
+        _pw = st.text_input("访问密码", type="password", placeholder="请输入访问密码")
+        _submitted = st.form_submit_button("登 录", use_container_width=True)
+    if _submitted:
+        if _pw == AUTH_PASSWORD:
+            st.session_state["authed"] = True
+            st.rerun()
+        else:
+            st.error("密码错误，请重试")
+    st.stop()
+
+# ==================== 全局设计系统 ====================
 st.markdown("""
 <style>
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 20px;
-        border-radius: 12px;
+    /* ---- 字体 ---- */
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    html, body, [class*="css"] {
+        font-family: 'Space Grotesk', -apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif;
+    }
+
+    /* ---- 设计 Token ---- */
+    :root {
+        --accent: #7c3aed;
+        --accent-2: #ec4899;
+        --accent-3: #f59e0b;
+        --accent-grad: linear-gradient(135deg, #7c3aed 0%, #ec4899 50%, #f59e0b 100%);
+        --accent-grad-soft: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+        --accent-tint: #f3e8ff;
+        --accent-tint-2: #ede9fe;
+        --accent-tint-3: #fdf4ff;
+        --ink: #1a1a2e;
+        --slate: #4a4a68;
+        --ash: #8e8ea0;
+        --ash-light: #b8b8c8;
+        --paper: #ffffff;
+        --canvas: #fafafa;
+        --canvas-2: #f5f5f7;
+        --line: #ececf1;
+        --line-light: #f1f1f6;
+        --success: #059669;
+        --success-tint: #d1fae5;
+        --danger: #ef4444;
+        --danger-tint: #fee2e2;
+        --warn: #d97706;
+        --warn-tint: #fef3c7;
+        --radius-sm: 6px;
+        --radius: 12px;
+        --radius-lg: 16px;
+        --shadow-xs: 0 1px 3px rgba(0,0,0,0.03), 0 1px 2px rgba(0,0,0,0.02);
+        --shadow-sm: 0 4px 24px rgba(0,0,0,0.05);
+        --shadow-hover: 0 8px 32px rgba(124,58,237,0.08);
+        --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* ---- 主区背景 ---- */
+    .stApp {
+        background: var(--canvas);
+    }
+    .main .block-container {
+        padding-top: 1.5rem;
+        max-width: 1320px;
+    }
+
+    /* ---------- 侧边栏：极浅紫灰底 + 右边框 ---------- */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #faf9ff 0%, #ffffff 100%);
+        border-right: 1px solid var(--line);
+    }
+    /* 侧边栏文字颜色 */
+    section[data-testid="stSidebar"] h1 {
+        color: var(--ink) !important;
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        font-size: 1.15rem !important;
+    }
+    section[data-testid="stSidebar"] h3 {
+        color: var(--ash) !important;
+        font-size: 0.68rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-weight: 600;
+        margin-bottom: 0.3rem;
+    }
+    section[data-testid="stSidebar"] .stCaption {
+        color: var(--slate) !important;
+    }
+    section[data-testid="stSidebar"] hr {
+        border: none;
+        height: 1px;
+        background: var(--line);
+        margin: 0.5rem 0;
+    }
+    /* 导航项：去掉默认圆点，用左竖线标记选中 */
+    section[data-testid="stSidebar"] .stRadio > div {
+        gap: 0;
+    }
+    section[data-testid="stSidebar"] .stRadio label {
+        padding: 6px 0 6px 12px;
+        border-left: 3px solid transparent;
+        transition: var(--transition);
+        font-size: 0.87rem;
+        color: var(--slate);
+        border-radius: 0;
+    }
+    section[data-testid="stSidebar"] .stRadio label:hover {
+        background: var(--canvas-2);
+        color: var(--ink);
+    }
+    section[data-testid="stSidebar"] .stRadio label[data-selected="true"] {
+        color: var(--accent) !important;
+        font-weight: 600;
+        border-left-color: transparent;
+        background: var(--accent-tint-2);
+        border-radius: 8px;
+    }
+    /* 导航选中态：渐变竖线装饰（覆盖border-left实现渐变） */
+    section[data-testid="stSidebar"] .stRadio label[data-selected="true"]::before {
+        content: '';
+        position: absolute;
+        left: 2px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 3px;
+        height: 55%;
+        background: var(--accent-grad);
+        border-radius: 2px;
+    }
+    section[data-testid="stSidebar"] .stRadio label {
+        position: relative;
+    }
+    /* 隐藏 radio 默认圆点 */
+    section[data-testid="stSidebar"] .stRadio input[type="radio"] {
+        display: none;
+    }
+    section[data-testid="stSidebar"] .stRadio label span:first-child {
+        display: none;
+    }
+
+    /* ---------- 页面标题：左侧teal竖线 ---------- */
+    [data-testid="stHeadingWithActionElements"] {
+        position: relative;
+        padding-left: 14px !important;
+    }
+    [data-testid="stHeadingWithActionElements"]::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 5px;
+        height: 60%;
+        background: var(--accent-grad);
+        border-radius: 3px;
+    }
+    [data-testid="stHeadingWithActionElements"] h1 {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+    }
+
+    /* ---------- Metric 卡片：顶部渐变条 + 淡色底 + hover上浮 ---------- */
+    div[data-testid="stMetric"] {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 16px 18px;
+        box-shadow: var(--shadow-xs);
+        transition: var(--transition);
+        position: relative;
+        overflow: hidden;
+    }
+    div[data-testid="stMetric"]:hover {
+        border-color: var(--ash-light);
+        box-shadow: var(--shadow-hover);
+        transform: translateY(-2px);
+    }
+    /* 顶部渐变条 + 淡色底（统一紫粉橙暖调） */
+    div[data-testid="stMetric"]::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, #7c3aed, #a855f7);
+        border-radius: var(--radius) var(--radius) 0 0;
+        z-index: 1;
+    }
+    div[data-testid="stMetric"]::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(180deg, rgba(124,58,237,0.05) 0%, rgba(255,255,255,0) 55%);
+        pointer-events: none;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(2) div[data-testid="stMetric"]::before {
+        background: linear-gradient(90deg, #ec4899, #f59e0b);
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(2) div[data-testid="stMetric"]::after {
+        background: linear-gradient(180deg, rgba(236,72,153,0.05) 0%, rgba(255,255,255,0) 55%);
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(3) div[data-testid="stMetric"]::before {
+        background: linear-gradient(90deg, #f59e0b, #fb923c);
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(3) div[data-testid="stMetric"]::after {
+        background: linear-gradient(180deg, rgba(245,158,11,0.05) 0%, rgba(255,255,255,0) 55%);
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(4) div[data-testid="stMetric"]::before {
+        background: linear-gradient(90deg, #fb923c, #ef4444);
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(4) div[data-testid="stMetric"]::after {
+        background: linear-gradient(180deg, rgba(251,146,60,0.05) 0%, rgba(255,255,255,0) 55%);
+    }
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        position: relative;
+        z-index: 1;
+    }
+    div[data-testid="stMetric"] label,
+    div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
+        position: relative;
+        z-index: 1;
+    }
+    div[data-testid="stMetric"] label {
+        font-size: 0.7rem !important;
+        color: var(--ash) !important;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 1.6rem !important;
+        font-weight: 700;
+        color: var(--ink);
+        margin: 4px 0;
+        white-space: nowrap;
+        background: linear-gradient(135deg, #7c3aed, #a855f7);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(2) div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        background: linear-gradient(135deg, #ec4899, #f59e0b);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(3) div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        background: linear-gradient(135deg, #f59e0b, #fb923c);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(4) div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        background: linear-gradient(135deg, #fb923c, #ef4444);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.72rem !important;
+        color: var(--slate);
+    }
+
+    /* ---------- 按钮 ---------- */
+    .stButton > button {
+        border-radius: var(--radius);
+        font-weight: 500;
+        font-size: 0.87rem;
+        transition: var(--transition);
+        border: 1px solid var(--line);
+    }
+    .stButton > button[kind="secondary"] {
+        background: var(--paper);
+        color: var(--slate);
+    }
+    .stButton > button[kind="secondary"]:hover {
+        background: var(--canvas-2);
+        border-color: var(--ash-light);
+        color: var(--ink);
+    }
+    .stButton > button[kind="primary"] {
+        background: var(--accent-grad-soft);
+        border: 1px solid transparent;
         color: white;
-        text-align: center;
+        box-shadow: 0 1px 2px rgba(124,58,237,0.15);
     }
-    .metric-value {
-        font-size: 2em;
-        font-weight: bold;
+    .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg, #6d28d9 0%, #a855f7 100%);
+        border-color: transparent;
+        box-shadow: 0 4px 16px rgba(124,58,237,0.25);
     }
-    .metric-label {
-        font-size: 0.9em;
-        opacity: 0.8;
+
+    /* ---------- 输入框/选择框 ---------- */
+    .stTextInput > div > input,
+    .stTextArea > div > textarea,
+    .stSelectbox > div > div {
+        border-radius: var(--radius) !important;
+        border-color: var(--line) !important;
+        transition: var(--transition);
     }
-    .status-online { color: #00ff00; font-weight: bold; }
-    .status-offline { color: #ff0000; font-weight: bold; }
+    .stTextInput > div > input:focus,
+    .stTextArea > div > textarea:focus {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px var(--accent-tint) !important;
+    }
+
+    /* ---------- 聊天消息 ---------- */
+    .stChatMessage {
+        border-radius: var(--radius-lg) !important;
+    }
+
+    /* ---------- Expander ---------- */
+    div[data-testid="stExpander"] {
+        border: 1px solid var(--line);
+        border-radius: var(--radius) !important;
+        overflow: hidden;
+        background: var(--paper);
+        box-shadow: var(--shadow-xs);
+    }
+    .streamlit-expanderHeader {
+        font-size: 0.87rem;
+        font-weight: 500;
+        background: var(--paper);
+    }
+
+    /* ---------- 容器(border=True) ---------- */
+    .stContainer[data-testid="stVerticalBlockBorderWrapper"] {
+        border: 1px solid var(--line) !important;
+        border-radius: var(--radius) !important;
+        background: var(--paper) !important;
+        box-shadow: var(--shadow-xs);
+        transition: var(--transition);
+    }
+    .stContainer[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-color: var(--ash-light) !important;
+        box-shadow: var(--shadow-sm);
+    }
+
+    /* ---------- Tabs ---------- */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0;
+        border-bottom: 1px solid var(--line);
+        background: var(--paper);
+        border-radius: var(--radius) var(--radius) 0 0;
+        padding: 0 4px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        padding: 7px 16px;
+        font-size: 0.85rem;
+        border-radius: 0;
+        transition: var(--transition);
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background: var(--canvas-2);
+    }
+    .stTabs [aria-selected="true"] {
+        color: var(--accent);
+        font-weight: 600;
+        border-bottom: 2px solid var(--accent);
+        background: transparent;
+    }
+    .stTabs [aria-selected="false"] {
+        color: var(--slate);
+    }
+
+    /* ---------- 状态提示 ---------- */
+    .stAlert {
+        border-radius: var(--radius) !important;
+        border: 1px solid var(--line) !important;
+    }
+    div[data-testid="stAlert-container"][data-btntype="success"] {
+        background: var(--success-tint) !important;
+        border-color: rgba(5,150,105,0.2) !important;
+    }
+    div[data-testid="stAlert-container"][data-btntype="error"] {
+        background: var(--danger-tint) !important;
+        border-color: rgba(220,38,38,0.2) !important;
+    }
+    div[data-testid="stAlert-container"][data-btntype="warning"] {
+        background: var(--warn-tint) !important;
+        border-color: rgba(217,119,6,0.2) !important;
+    }
+
+    /* ---------- 标题 ---------- */
+    h1 {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+    }
+    h2, [data-testid="stSubheading"] {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+    }
+    h3 {
+        font-weight: 600;
+        color: var(--ink);
+    }
+
+    /* ---------- 滚动条 ---------- */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--ash); }
+
+    /* ---------- 链接 ---------- */
+    a { color: var(--accent); text-decoration: none; transition: var(--transition); }
+    a:hover { color: #6d28d9; text-decoration: underline; }
+
+    /* ---------- 代码块 ---------- */
+    .stCodeBlock {
+        border-radius: var(--radius);
+    }
+    code {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.82rem;
+    }
+
+    /* ---------- DataFrame ---------- */
+    .stDataFrame {
+        border-radius: var(--radius);
+        overflow: hidden;
+        border: 1px solid var(--line);
+    }
+
+    /* ---------- 分隔线 ---------- */
+    .stDivider > hr, hr {
+        border: none !important;
+        height: 1px !important;
+        background: var(--line) !important;
+    }
+
+    /* ---------- Markdown 表格 ---------- */
+    .stMarkdown table {
+        border-radius: var(--radius);
+        overflow: hidden;
+        border: 1px solid var(--line);
+    }
+    .stMarkdown table th {
+        background: var(--canvas-2);
+        font-weight: 600;
+        font-size: 0.82rem;
+        color: var(--ink);
+    }
+    .stMarkdown table td {
+        font-size: 0.83rem;
+    }
+    .stMarkdown table tr:hover td {
+        background: var(--accent-tint-2);
+    }
+
+    /* ---------- 聊天输入框 ---------- */
+    .stChatInput > div {
+        border-radius: var(--radius-lg) !important;
+    }
+
+    /* ---------- 文件上传 ---------- */
+    .stFileUploader > div {
+        border-radius: var(--radius) !important;
+        border-color: var(--line) !important;
+    }
+
+    /* ---------- 进度条 ---------- */
+    .stProgress > div > div {
+        background: var(--accent-grad-soft);
+    }
+
+    /* ---------- 选择框下拉菜单 ---------- */
+    div[data-baseweb="select"] > div {
+        border-radius: var(--radius) !important;
+    }
+
+    /* ---------- 标题副标题间距 ---------- */
+    .stTitle + .stCaption {
+        margin-top: -0.3rem;
+        color: var(--ash);
+        font-size: 0.82rem;
+    }
+
+    /* ---------- 数字输入框 ---------- */
+    .stNumberInput > div > div > input {
+        font-family: 'JetBrains Mono', monospace !important;
+    }
+
+    /* ---------- 微调: 减少默认间距 ---------- */
+    .stMarkdown {
+        margin-bottom: 0.3rem;
+    }
+
+    /* ================= 组件级渐变皮肤（全页面） ================= */
+
+    /* ---------- 选择框/多选框：渐变下拉、紫色选中 ---------- */
+    .stSelectbox [data-rac][role="group"] > input[role="combobox"],
+    .stMultiSelect [data-rac][role="group"] > input[role="combobox"],
+    .stTextInput [data-rac] > input,
+    .stTextArea textarea {
+        border-radius: var(--radius) !important;
+        border-color: var(--line) !important;
+        transition: var(--transition);
+        background: var(--paper) !important;
+    }
+    .stSelectbox [data-rac][role="group"]:hover input,
+    .stMultiSelect [data-rac][role="group"]:hover input,
+    .stTextInput [data-rac]:hover input {
+        border-color: rgba(124,58,237,0.4) !important;
+    }
+    .stSelectbox [data-rac][role="group"]:focus-within input,
+    .stMultiSelect [data-rac][role="group"]:focus-within input,
+    .stTextInput [data-rac]:focus-within input {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px var(--accent-tint) !important;
+    }
+    /* 下拉面板选项选中态 */
+    [role="option"][aria-selected="true"],
+    li[role="option"]:active {
+        background: var(--accent-tint-2) !important;
+        color: var(--accent) !important;
+    }
+    [data-baseweb="popover"] li[role="option"]:hover,
+    li[role="option"]:hover {
+        background: var(--accent-tint) !important;
+    }
+    /* 选择框下拉箭头：紫色（替代默认深灰） */
+    .stSelectbox [data-rac] svg,
+    .stMultiSelect [data-rac] svg {
+        color: var(--accent) !important;
+        fill: var(--accent) !important;
+    }
+
+    /* ---------- 滑动条：渐变轨道（React Aria 结构） ---------- */
+    div[data-testid="stSlider"] div[data-testid="stSliderThumbValue"] {
+        color: var(--accent) !important;
+        font-weight: 600;
+    }
+    /* 滑块 thumb：紫色渐变圆形 */
+    div[data-testid="stSlider"] div[data-rac][style*="position: absolute"] {
+        background: var(--accent-grad-soft) !important;
+        border: 2px solid #ffffff !important;
+        box-shadow: 0 2px 8px rgba(124,58,237,0.4) !important;
+    }
+    /* 滑块轨道填充：紫粉渐变（React Aria 轨道为 emotion class e23vpic5，
+       背景含动态百分比断点，需精确覆盖；同时保留内联样式兜底） */
+    div[data-testid="stSlider"] div[class*="e23vpic5"] {
+        background-image: linear-gradient(90deg, #7c3aed 0%, #ec4899 50%, #f59e0b 100%) !important;
+    }
+    div[data-testid="stSlider"] div[style*="background"] {
+        background: linear-gradient(90deg, #7c3aed 0%, #a855f7 100%) !important;
+    }
+
+    /* ---------- 复选框：选中态紫色 ---------- */
+    .stCheckbox [data-testid="stCheckbox"] label span[aria-checked="true"] {
+        background: var(--accent) !important;
+        border-color: var(--accent) !important;
+    }
+    .stCheckbox [data-testid="stCheckbox"] label span[aria-checked="true"] svg {
+        color: white !important;
+    }
+
+    /* ---------- 聊天消息气泡：用户渐变底、助手白底 ---------- */
+    .stChatMessage[data-testid="stChatMessage"] {
+        border-radius: var(--radius-lg) !important;
+        border: 1px solid var(--line);
+        background: var(--paper);
+        box-shadow: var(--shadow-xs);
+    }
+    .stChatMessage [data-testid="stChatMessageContent"] p {
+        font-size: 0.9rem;
+    }
+    /* 用户消息渐变底 */
+    div[data-testid="stChatMessage"][data-testid="stChatMessageAvatarUser"] {
+        background: linear-gradient(135deg, var(--accent-tint-2) 0%, var(--accent-tint-3) 100%);
+        border-color: rgba(124,58,237,0.15);
+    }
+
+    /* ---------- 聊天输入框：渐变边框聚焦 ---------- */
+    div[data-testid="stChatInput"] {
+        border-radius: var(--radius-lg) !important;
+        border-color: var(--line) !important;
+        background: var(--paper) !important;
+        box-shadow: var(--shadow-xs);
+        transition: var(--transition);
+    }
+    div[data-testid="stChatInput"]:focus-within {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px var(--accent-tint) !important;
+    }
+    /* 发送按钮：渐变底 */
+    div[data-testid="stChatInput"] button[data-testid="stChatInputSubmitButton"]:not([disabled]) {
+        background: var(--accent-grad-soft) !important;
+        color: white !important;
+        border: none !important;
+    }
+
+    /* ---------- Expander 头部 hover 渐变 ---------- */
+    .streamlit-expanderHeader:hover {
+        color: var(--accent) !important;
+    }
+
+    /* ---------- 文件上传：拖拽区渐变边框 ---------- */
+    .stFileUploader > div:hover {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px var(--accent-tint) !important;
+    }
+
+    /* ---------- 数据帧表格：表头浅紫底 ---------- */
+    .stDataFrame thead tr th {
+        background: var(--accent-tint-2) !important;
+        color: var(--slate) !important;
+        font-weight: 600 !important;
+    }
+
+    /* ---------- 数字输入：聚焦紫光 ---------- */
+    .stNumberInput > div > div > input:focus {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px var(--accent-tint) !important;
+    }
+
+    /* ---------- st.status 完成态徽章：浅紫渐变底 + 深紫文字 ---------- */
+    details summary:has([data-testid="stExpanderIconCheck"]) {
+        background: linear-gradient(135deg, var(--accent-tint-2), var(--accent-tint-3)) !important;
+        border-radius: var(--radius) !important;
+        padding: 6px 12px !important;
+        color: var(--accent) !important;
+        font-weight: 600 !important;
+        border: 1px solid var(--accent-tint) !important;
+        transition: var(--transition);
+    }
+    details summary:has([data-testid="stExpanderIconCheck"]):hover {
+        border-color: var(--accent) !important;
+        box-shadow: 0 2px 8px rgba(124,58,237,0.15) !important;
+    }
+
+    /* ---------- 指标卡片 hover 通用（非系统监控页） ---------- */
+    div[data-testid="stMetric"] {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow-xs);
+        transition: var(--transition);
+        position: relative;
+        overflow: hidden;
+    }
+    div[data-testid="stMetric"]:hover {
+        border-color: var(--ash-light);
+        box-shadow: var(--shadow-hover);
+        transform: translateY(-2px);
+    }
+
+    /* ---------- 状态徽章统一（st.success / st.error / st.warning / st.info） ---------- */
+    div[data-testid="stAlert-container"] {
+        border-radius: var(--radius) !important;
+        border: 1px solid var(--line) !important;
+    }
+    div[data-testid="stAlert-container"][data-btntype="success"] {
+        background: var(--success-tint) !important;
+    }
+    div[data-testid="stAlert-container"][data-btntype="error"] {
+        background: var(--danger-tint) !important;
+    }
+    div[data-testid="stAlert-container"][data-btntype="warning"] {
+        background: var(--warn-tint) !important;
+    }
+    div[data-testid="stAlert-container"][data-btntype="info"] {
+        background: var(--accent-tint-2) !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ==================== 移动端自适应（≤768px 手机） ====================
+st.markdown("""
+<style>
+@media (max-width: 768px) {
+    /* 主内容区收窄内边距 */
+    .block-container {
+        padding: 1rem 0.9rem 2rem !important;
+        max-width: 100% !important;
+    }
+    /* 多列布局强制单列堆叠 */
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+    }
+    [data-testid="stHorizontalBlock"] > div {
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+        width: 100% !important;
+    }
+    /* 侧边栏抽屉宽度 */
+    [data-testid="stSidebar"] {
+        width: 290px !important;
+    }
+    /* 侧边栏长文本自动换行，避免截断 */
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] div {
+        overflow-wrap: break-word !important;
+        word-break: break-word !important;
+    }
+    /* 标题字号适配 */
+    h1 { font-size: 1.35rem !important; }
+    h2 { font-size: 1.15rem !important; }
+    h3 { font-size: 1.02rem !important; }
+    /* 按钮全宽方便触控 */
+    .stButton > button,
+    .stDownloadButton > button,
+    .stFormSubmitButton > button {
+        width: 100% !important;
+    }
+    /* 指标卡片紧凑 */
+    div[data-testid="stMetric"] {
+        padding: 0.6rem 0.8rem !important;
+    }
+    /* 隐藏装饰性顶栏，让出空间 */
+    div[data-testid="stDecoration"] {
+        display: none !important;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
 
 # ==================== 侧边栏 ====================
 with st.sidebar:
-    st.title("🏭 本地 AI 工厂")
-    st.markdown("<p style='font-size:1.3em;font-weight:bold;color:#1a1a1a;margin-top:-10px;'>李准的星小辰</p>", unsafe_allow_html=True)
-    st.caption(f"MacBook Pro 128GB | Apple Silicon")
-    st.divider()
+    # 品牌区：精致的 logo + 标题 + 副标题
+    st.markdown("""
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px;">
+        <div style="width:36px;height:36px;border-radius:12px;background:linear-gradient(135deg,#7c3aed,#ec4899 50%,#f59e0b);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;box-shadow:0 4px 12px rgba(124,58,237,0.25);">
+            🏭
+        </div>
+        <div>
+            <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1.05rem;color:#1a1a2e;letter-spacing:-0.02em;line-height:1.2;">AI 工厂</div>
+            <div style="font-size:0.72rem;color:#8e8ea0;font-weight:500;line-height:1.2;">李准的星小辰</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.caption(f"M5 Max · 137GB · v{APP_VERSION}")
+    st.markdown("<hr/>", unsafe_allow_html=True)
 
     page = st.radio(
         "导航",
-        ["📊 系统监控", "🧠 文本对话", "🔬 模型对比", "👁️ 图片理解", "🎬 视频理解", "🎨 图片生成",
-         "🎬 视频生成", "🎤 语音识别", "🔊 语音合成", "📚 智能问答", "📈 Token 统计", "📋 日志查看",
-         "📖 AI工厂说明"],
-        index=0
+        ["📊 系统监控", "🧠 文本对话", "🔬 模型对比",
+         "👁️ 图片理解", "🎨 图片生成",
+         "🎥 视频理解", "🎬 视频生成",
+         "🎤 语音识别", "🔊 语音合成",
+         "📚 智能问答", "📈 Token 统计",
+         "📋 日志查看", "📖 AI工厂说明"],
+        index=0,
+        label_visibility="collapsed"
     )
 
-    st.divider()
-    st.subheader("服务状态")
+    st.markdown("<hr/>", unsafe_allow_html=True)
+
+    # 服务状态
+    st.markdown("<h3>服务状态</h3>", unsafe_allow_html=True)
     services = get_service_status()
     for name, info in services.items():
-        icon = "🟢" if info["status"] == "online" else "🔴"
-        st.markdown(f"{icon} **{name}**")
-        if info.get("model"):
-            st.markdown(f"<span style='font-size:0.85em'>{info['model']}</span>", unsafe_allow_html=True)
+        icon = "●" if info["status"] == "online" else "○"
+        color = "#7c3aed" if info["status"] == "online" else "#b8b8c8"
+        model_str = f" <span style='font-size:0.68rem;color:#8e8ea0'>{info['model']}</span>" if info.get("model") else ""
+        st.markdown(f"<div style='font-size:0.78rem;color:#4a4a68;padding:2px 0;'><span style='color:{color};font-size:0.6rem;'>{icon}</span> {name}{model_str}</div>", unsafe_allow_html=True)
 
-    # 知识库同步时间
+    # 智能问答同步信息
     sync_info = get_last_sync_info()
-    st.divider()
-    st.subheader("知识库同步")
+    st.markdown("<hr/>", unsafe_allow_html=True)
+    st.markdown("<h3>智能问答</h3>", unsafe_allow_html=True)
     if sync_info["time"]:
-        st.markdown(f"🕐 **上次同步**")
-        st.caption(sync_info["time"])
+        st.markdown(f"<div style='font-size:0.78rem;color:#4a4a68;'>同步于 {sync_info['time'][:16]}</div>", unsafe_allow_html=True)
         st.caption(sync_info["result"])
     else:
         st.caption("暂无同步记录")
@@ -978,7 +1815,8 @@ if page == "📊 系统监控":
         # 指标卡片
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("CPU 使用率", f"{local_info['cpu_percent']:.1f}%")
+            st.metric("CPU 使用率", f"{local_info['cpu_percent']:.1f}%",
+                       f"{psutil.cpu_count(logical=True)} 逻辑核心")
         with col2:
             st.metric("内存使用", f"{local_info['memory'].percent:.1f}%",
                        f"{local_info['memory'].used / 1024**3:.1f} / {local_info['memory'].total / 1024**3:.1f} GB")
@@ -1001,8 +1839,8 @@ if page == "📊 系统监控":
             fig_cpu.add_trace(go.Scatter(
                 y=list(st.session_state.sys_history["cpu"]),
                 mode='lines+markers', name='CPU',
-                line=dict(color='#667eea', width=2),
-                fill='tozeroy', fillcolor='rgba(102,126,234,0.1)'
+                line=dict(color='#7c3aed', width=2),
+                fill='tozeroy', fillcolor='rgba(124,58,237,0.06)'
             ))
             fig_cpu.update_layout(yaxis_range=[0, 100], height=300,
                 margin=dict(l=20, r=20, t=20, b=20),
@@ -1015,8 +1853,8 @@ if page == "📊 系统监控":
             fig_mem.add_trace(go.Scatter(
                 y=list(st.session_state.sys_history["memory"]),
                 mode='lines+markers', name='内存',
-                line=dict(color='#764ba2', width=2),
-                fill='tozeroy', fillcolor='rgba(118,75,162,0.1)'
+                line=dict(color='#ec4899', width=2),
+                fill='tozeroy', fillcolor='rgba(236,72,153,0.06)'
             ))
             fig_mem.update_layout(yaxis_range=[0, 100], height=300,
                 margin=dict(l=20, r=20, t=20, b=20),
@@ -1033,19 +1871,19 @@ if page == "📊 系统监控":
             with sc1:
                 st.write(f"**{name}**")
                 if info.get("model"):
-                    st.markdown(f"<span style='font-size:0.9em;color:#667eea'>{info['model']}</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='font-size:0.9em;color:#7c3aed'>{info['model']}</span>", unsafe_allow_html=True)
             with sc2:
                 if info["status"] == "online":
-                    st.success("运行中")
+                    st.markdown("<div style='background:linear-gradient(135deg,#ede9fe,#f5f3ff);color:#6d28d9;border:1px solid rgba(124,58,237,0.2);border-radius:8px;padding:4px 12px;text-align:center;font-size:0.82rem;font-weight:600;display:inline-block;'>● 运行中</div>", unsafe_allow_html=True)
                 else:
-                    st.error("离线")
+                    st.markdown("<div style='background:#f5f5f7;color:#8e8ea0;border:1px solid #ececf1;border-radius:8px;padding:4px 12px;text-align:center;font-size:0.82rem;font-weight:500;display:inline-block;'>离线</div>", unsafe_allow_html=True)
             with sc3:
                 st.caption(f"端口 {info['port']}")
 
         st.divider()
 
-        # 知识库同步信息
-        st.subheader("📚 知识库同步")
+        # 智能问答同步信息
+        st.subheader("📚 智能问答同步")
         sync_info = get_last_sync_info()
         sc_a, sc_b = st.columns([3, 5])
         with sc_a:
@@ -1057,7 +1895,10 @@ if page == "📊 系统监控":
         with sc_b:
             if sync_info["result"]:
                 st.write("**同步结果**")
-                st.success(sync_info["result"])
+                st.metric("同步状态", sync_info["result"])
+            else:
+                st.write("**同步结果**")
+                st.info("暂无同步记录")
         st.subheader("🔄 运行中的模型进程")
         frag_processes = get_process_info()
         if frag_processes:
@@ -1329,11 +2170,13 @@ elif page == "🔬 模型对比":
                     y=summary_df["avg_time"],
                     text=[f"{v:.1f}s" for v in summary_df["avg_time"]],
                     textposition='auto',
-                    marker_color='lightblue'
+                    marker_color='#7c3aed'
                 )
             ])
-            fig_time.update_layout(title="平均响应时间 (7项汇总)", xaxis_title="模型", yaxis_title="秒", height=300)
-            st.plotly_chart(fig_time, use_container_width=True)
+            fig_time.update_layout(title="平均响应时间 (7项汇总)", xaxis_title="模型", yaxis_title="秒", height=300,
+                margin=dict(l=20, r=20, t=40, b=20),
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_time, use_container_width=True, config={'displaylogo': False, 'scrollZoom': True})
         with col2:
             fig_tok = go.Figure(data=[
                 go.Bar(
@@ -1341,11 +2184,13 @@ elif page == "🔬 模型对比":
                     y=summary_df["avg_tok_sec"],
                     text=[f"{v:.1f}" for v in summary_df["avg_tok_sec"]],
                     textposition='auto',
-                    marker_color='lightgreen'
+                    marker_color='#ec4899'
                 )
             ])
-            fig_tok.update_layout(title="平均吞吐量 (7项汇总)", xaxis_title="模型", yaxis_title="tokens/秒", height=300)
-            st.plotly_chart(fig_tok, use_container_width=True)
+            fig_tok.update_layout(title="平均吞吐量 (7项汇总)", xaxis_title="模型", yaxis_title="tokens/秒", height=300,
+                margin=dict(l=20, r=20, t=40, b=20),
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_tok, use_container_width=True, config={'displaylogo': False, 'scrollZoom': True})
 
         # 汇总表格
         st.subheader("📋 汇总数据")
@@ -1421,7 +2266,7 @@ elif page == "👁️ 图片理解":
 
         prompt = st.text_input("提问", value="详细描述这张图片的内容")
 
-        if st.button("🔍 分析图片"):
+        if st.button("🔍 分析图片", type="primary"):
             # 保存临时文件
             temp_path = f"/tmp/upload_{uploaded_file.name}"
             with open(temp_path, "wb") as f:
@@ -1566,8 +2411,8 @@ print(json.dumps({"gen_time": f"{time.time() - t1:.1f}"}), flush=True)
 
 
 # ==================== 视频理解页 ====================
-elif page == "🎬 视频理解":
-    st.title("🎬 视频理解")
+elif page == "🎥 视频理解":
+    st.title("🎥 视频理解")
     st.caption("基于 Qwen3.8-27B 多模态模型，支持视频内容分析与理解")
 
     uploaded_video = st.file_uploader("上传视频", type=["mp4", "avi", "mov", "mkv", "webm"])
@@ -1579,7 +2424,7 @@ elif page == "🎬 视频理解":
 
         prompt = st.text_input("提问", value="详细描述这个视频的内容")
 
-        if st.button("🔍 分析视频"):
+        if st.button("🔍 分析视频", type="primary"):
             # 保存临时文件
             temp_video_path = f"/tmp/upload_{uploaded_video.name}"
             with open(temp_video_path, "wb") as f:
@@ -1763,20 +2608,26 @@ elif page == "🎨 图片生成":
                 steps = st.slider("推理步数", 1, 50, default_steps, help="步数越多质量越好但更慢")
                 seed = st.number_input("随机种子", value=-1, help="-1 表示随机")
 
-        if st.button("🎨 生成图片", disabled=not comfy_online):
+        if st.button("🎨 生成图片", type="primary", disabled=not comfy_online):
             progress_bar = st.progress(0.0, text=f"初始化（{model_name.upper()} · {steps}步 · {img_width}x{img_height}）...")
             status_text = st.empty()
             t_start = time.time()
 
             def on_progress(step, total, status):
-                pct = step / total if total > 0 else 0.0
                 elapsed = time.time() - t_start
                 if status == "loading_model":
-                    progress_bar.progress(0.02, text=f"正在加载模型... ({elapsed:.0f}s)")
+                    progress_bar.progress(0.02, text=f"🔄 正在加载模型... ({elapsed:.0f}s)")
                 elif status == "sampling":
-                    progress_bar.progress(pct, text=f"采样中... 第 {step}/{total} 步 ({elapsed:.0f}s)")
+                    pct = step / total if total > 0 else 0.0
+                    if step > 0 and elapsed > 0:
+                        eta = elapsed / step * (total - step)
+                        eta_min = int(eta // 60)
+                        eta_sec = int(eta % 60)
+                        progress_bar.progress(pct, text=f"🎨 采样中... 第 {step}/{total} 步 ({elapsed:.0f}s | 预计还剩 {eta_min}分{eta_sec}秒)")
+                    else:
+                        progress_bar.progress(pct, text=f"🎨 采样中... 第 {step}/{total} 步 ({elapsed:.0f}s)")
                 elif status == "done":
-                    progress_bar.progress(1.0, text=f"采样完成，正在解码图像... ({elapsed:.0f}s)")
+                    progress_bar.progress(0.95, text=f"✅ 采样完成，正在解码图像... ({elapsed:.0f}s)")
 
             img_path, error = generate_image_comfyui(
                 prompt, model=model_name,
@@ -1846,12 +2697,13 @@ elif page == "🎬 视频生成":
                     "Full 20 Quality (最高质量)"
                 ], help="Turbo 4: 5步最快 | Turbo 8: 9步平衡 | Full 20: 21步最高质量",
                 key="t2v_profile")
-                gen_profile_key = gen_profile.split(" ")[0] + " " + gen_profile.split(" ")[1]
+                # 去掉括号内的中文标注，得到 ComfyUI 需要的 profile key
+                gen_profile_key = gen_profile.split(" (")[0].strip()
             with col2:
                 resolution = st.selectbox("分辨率", [
                     "864x480 (推荐)",
-                    "768x432 (轻量)",
-                    "960x540 (高清)",
+                    "768x448 (轻量)",
+                    "960x544 (高清)",
                     "640x384 (极速)"
                 ], key="t2v_res")
                 width, height = map(int, resolution.split(" ")[0].split("x"))
@@ -1861,19 +2713,26 @@ elif page == "🎬 视频生成":
 
         st.caption("💡 Turbo 4 Fast 模式约 2-4 分钟出视频，Full 20 Quality 约 5-10 分钟。生成含同步音频。")
 
-        if st.button("🎬 生成视频", disabled=not comfy_online, key="t2v_btn"):
+        if st.button("🎬 生成视频", type="primary", disabled=not comfy_online, key="t2v_btn"):
             progress_bar = st.progress(0.0, text=f"初始化（MiniMax H3 · {gen_profile_key}）...")
             t_start = time.time()
 
             def on_progress_t2v(step, total, status):
-                pct = step / total if total > 0 else 0.0
                 elapsed = time.time() - t_start
                 if status == "loading_model":
-                    progress_bar.progress(0.05, text=f"正在加载模型... ({elapsed:.0f}s)")
+                    progress_bar.progress(0.02, text=f"🔄 正在加载模型... ({elapsed:.0f}s)")
                 elif status == "sampling":
-                    progress_bar.progress(pct, text=f"推理中... 第 {step}/{total} 步 ({elapsed:.0f}s)")
+                    pct = step / total if total > 0 else 0.0
+                    # 计算预估剩余时间
+                    if step > 0 and elapsed > 0:
+                        eta = elapsed / step * (total - step)
+                        eta_min = int(eta // 60)
+                        eta_sec = int(eta % 60)
+                        progress_bar.progress(pct, text=f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s | 预计还剩 {eta_min}分{eta_sec}秒)")
+                    else:
+                        progress_bar.progress(pct, text=f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s)")
                 elif status == "done":
-                    progress_bar.progress(1.0, text=f"推理完成，正在渲染视频... ({elapsed:.0f}s)")
+                    progress_bar.progress(0.95, text=f"✅ 推理完成，正在渲染视频... ({elapsed:.0f}s)")
 
             vid_path, error = generate_video_comfyui(
                 prompt_t2v,
@@ -1927,13 +2786,13 @@ elif page == "🎬 视频生成":
                         "Full 20 Quality (最高质量)"
                     ], help="Turbo 4: 5步最快 | Turbo 8: 9步平衡 | Full 20: 21步最高质量",
                     key="i2v_profile")
-                    i2v_profile_key = i2v_profile.split(" ")[0] + " " + i2v_profile.split(" ")[1]
-                    i2v_steps = {"Turbo 4": 5, "Turbo 8": 9, "Full 20": 21}.get(i2v_profile_key, 5)
+                    i2v_profile_key = i2v_profile.split(" (")[0].strip()
+                    i2v_steps = {"Turbo 4 Fast": 5, "Turbo 8 Balanced": 9, "Full 20 Quality": 21}.get(i2v_profile_key, 5)
                 with col2:
                     i2v_resolution = st.selectbox("分辨率", [
                         "864x480 (推荐)",
-                        "768x432 (轻量)",
-                        "960x540 (高清)",
+                        "768x448 (轻量)",
+                        "960x544 (高清)",
                         "640x384 (极速)"
                     ], key="i2v_res")
                     i2v_width, i2v_height = map(int, i2v_resolution.split(" ")[0].split("x"))
@@ -1944,7 +2803,7 @@ elif page == "🎬 视频生成":
 
             st.caption("💡 Turbo 4 Fast 模式约 3-5 分钟出视频。图生视频使用本地 MiniMax H3 模型，无需 API key。")
 
-            if st.button("🎬 图生视频", key="i2v_btn"):
+            if st.button("🎬 图生视频", type="primary", key="i2v_btn"):
                 # 保存上传的图片
                 temp_img_path = os.path.join(OUTPUT_VIDEO_GEN, f"_i2v_input_{int(time.time())}.png")
                 with open(temp_img_path, "wb") as f:
@@ -1956,12 +2815,18 @@ elif page == "🎬 视频生成":
                 def on_progress_i2v(step, total, status):
                     elapsed = time.time() - t_start_i2v
                     if status == "loading_model":
-                        progress_bar_i2v.progress(0.05, text=f"正在加载模型... ({elapsed:.0f}s)")
+                        progress_bar_i2v.progress(0.02, text=f"🔄 正在加载模型... ({elapsed:.0f}s)")
                     elif status == "sampling":
                         pct = step / total if total > 0 else 0
-                        progress_bar_i2v.progress(pct, text=f"推理中... 第 {step}/{total} 步 ({elapsed:.0f}s)")
+                        if step > 0 and elapsed > 0:
+                            eta = elapsed / step * (total - step)
+                            eta_min = int(eta // 60)
+                            eta_sec = int(eta % 60)
+                            progress_bar_i2v.progress(pct, text=f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s | 预计还剩 {eta_min}分{eta_sec}秒)")
+                        else:
+                            progress_bar_i2v.progress(pct, text=f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s)")
                     elif status == "done":
-                        progress_bar_i2v.progress(1.0, text=f"推理完成，正在渲染视频... ({elapsed:.0f}s)")
+                        progress_bar_i2v.progress(0.95, text=f"✅ 推理完成，正在渲染视频... ({elapsed:.0f}s)")
 
                 vid_path, error = generate_image_to_video_local(
                     temp_img_path, prompt_i2v,
@@ -2032,7 +2897,7 @@ elif page == "🎤 语音识别":
         with col_mode:
             speech_mode = st.radio("说话模式（星辰慧记引擎生效）", ["多人", "单人"], horizontal=True)
 
-        if st.button("🎤 开始识别"):
+        if st.button("🎤 开始识别", type="primary"):
             # 保存临时文件
             temp_path = f"/tmp/asr_input_{int(time.time())}_{uploaded_audio.name}"
             with open(temp_path, "wb") as f:
@@ -2149,7 +3014,7 @@ elif page == "🔊 语音合成":
             with col_b:
                 pitch = st.slider("音调", -50, 50, 0, help="负数变低，正数变高")
 
-        if st.button("🔊 生成语音", key="btn_edge_tts"):
+        if st.button("🔊 生成语音", type="primary", key="btn_edge_tts"):
             with st.spinner("生成中..."):
                 voice_id = voice.split(" ")[0]
                 output_path, error = synthesize_speech(text, voice_id, rate=rate, volume=volume, pitch=pitch)
@@ -2203,7 +3068,7 @@ elif page == "🔊 语音合成":
                     help="用自然语言描述你想要的语气、情感、语速等效果，留空则使用默认风格"
                 )
 
-                if st.button("🔊 生成语音（Qwen3-TTS）", key="btn_qwen_tts"):
+                if st.button("🔊 生成语音（Qwen3-TTS）", type="primary", key="btn_qwen_tts"):
                     with st.spinner("合成中...（CPU 推理约 6-15 秒）"):
                         output_path = os.path.join(OUTPUT_AUDIO_TTS, f"tts_qwen3_{int(time.time())}.wav")
                         os.makedirs(OUTPUT_AUDIO_TTS, exist_ok=True)
@@ -2285,7 +3150,7 @@ elif page == "🔊 语音合成":
                     clone_lang_options = ["Auto（自动检测）", "Chinese（中文）", "English（英语）", "Japanese（日语）", "Korean（韩语）", "German（德语）", "French（法语）", "Russian（俄语）", "Portuguese（葡萄牙语）", "Spanish（西班牙语）", "Italian（意大利语）"]
                     clone_lang_sel = st.selectbox("语言", clone_lang_options, index=0, key="clone_lang")
 
-                    if st.button("🔊 克隆生成语音", key="btn_voice_clone"):
+                    if st.button("🔊 克隆生成语音", type="primary", key="btn_voice_clone"):
                         if ref_audio_file is None:
                             st.error("请先上传参考音频")
                         elif "ICL" in clone_mode and not ref_text_val.strip():
@@ -2624,6 +3489,12 @@ elif page == "📚 智能问答":
                     _dp = _doc_paths.get(d, "")
                     with st.container(border=True):
                         st.markdown(f"📄 **{d}**")
+                        # 路径失效时自动修复
+                        if not (_dp and os.path.exists(_dp)):
+                            _fixed_dp, _fix_src = resolve_file_path(d)
+                            if _fixed_dp:
+                                _dp = _fixed_dp
+                                _doc_paths[d] = _dp  # 更新缓存
                         if _dp and os.path.exists(_dp):
                             _c1, _c2 = st.columns(2)
                             with _c1:
@@ -2671,7 +3542,7 @@ elif page == "📚 智能问答":
             selected_kb = st.selectbox("选择文档库", list(kb_options.keys()), index=len(kb_options)-1)
             query = st.text_input("搜索内容", placeholder="输入关键词...", key="ragflow_query")
 
-            if st.button("🔍 搜索", key="ragflow_search") and query:
+            if st.button("🔍 搜索", type="primary", key="ragflow_search") and query:
                 with st.spinner("搜索中..."):
                     try:
                         if kb_options[selected_kb]:
@@ -2746,6 +3617,12 @@ elif page == "📚 智能问答":
                         _content = r["content"]
                         _snippet_md = _re.sub(r'【(.+?)】', r'**:orange[\1]**', _content)
                         st.markdown(f"> {_snippet_md}")
+                        # 路径失效时自动修复
+                        if not (doc_path and os.path.exists(doc_path)):
+                            _fixed_dp, _fix_src = resolve_file_path(doc_name)
+                            if _fixed_dp:
+                                doc_path = _fixed_dp
+                                _doc_paths[doc_name] = doc_path
                         if doc_path and os.path.exists(doc_path):
                             col1, col2 = st.columns(2)
                             with col1:
@@ -2815,7 +3692,7 @@ elif page == "📚 智能问答":
                         result_limit = st.selectbox("结果数量", [10, 20, 50], index=0, key="fts_limit")
                     with col_btn:
                         st.write("")
-                        search_clicked = st.button("🔍 搜索", key="fts_search", use_container_width=True)
+                        search_clicked = st.button("🔍 搜索", type="primary", key="fts_search", use_container_width=True)
                     with col_stats:
                         st.write("")
                         if st.button("📊 索引统计", key="fts_stats_btn"):
@@ -3021,6 +3898,11 @@ elif page == "📚 智能问答":
                                 st.caption(f"📁 {fdir}")
                                 st.markdown(meta)
                                 st.markdown(f"> {snippet_md}")
+                                # 路径失效时自动修复
+                                if not os.path.exists(fpath):
+                                    _fixed_dp, _ = resolve_file_path(fname)
+                                    if _fixed_dp:
+                                        fpath = _fixed_dp
                                 col1, col2 = st.columns(2)
                                 with col1:
                                     if st.button("📂 打开文件", key=f"open_{i}"):
@@ -3147,9 +4029,8 @@ elif page == "📈 Token 统计":
             x=[h["time"] for h in history_list],
             y=[h["tokens"] for h in history_list],
             name='Tokens',
-            marker_color='#667eea'
+            marker_color='#7c3aed'
         ))
-
         fig.update_layout(
             height=400,
             margin=dict(l=20, r=20, t=20, b=20),
@@ -3167,7 +4048,7 @@ elif page == "📈 Token 统计":
             y=[h["tokens"] / h["elapsed"] if h["elapsed"] > 0 else 0 for h in history_list],
             mode='lines+markers',
             name='tok/s',
-            line=dict(color='#764ba2', width=2)
+            line=dict(color='#ec4899', width=2)
         ))
         fig_speed.update_layout(
             height=300,
@@ -3276,7 +4157,7 @@ elif page == "📖 AI工厂说明":
 
     **本地 AI 工厂** 是基于 MacBook Pro M5 Max / 137GB 搭建的**全本地多模态 AI 环境**，所有模型在本地运行，无需联网，数据不出设备。
 
-    > 作者：李准的星小辰 · 版本：v2.0.0
+    > 作者：李准的星小辰 · 版本：v{APP_VERSION}
 
     ---
 
@@ -3382,9 +4263,18 @@ elif page == "📖 AI工厂说明":
     └── README.md / CHANGELOG.md  # 项目文档
     ```
     """)
-    st.markdown(intro_md)
+    st.markdown(intro_md.replace("{APP_VERSION}", APP_VERSION))
 
 
 # ==================== 底部信息 ====================
 st.divider()
-st.caption(f"🏭 本地 AI 工厂 v1.0.0 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | MacBook Pro 128GB")
+st.markdown(f"""
+<div style='text-align:center;padding:0.5rem 0 0.8rem;'>
+    <span style='font-size:0.74rem;color:#8e8ea0;font-weight:400;'>
+        🏭 本地 AI 工厂 <span style='font-family:JetBrains Mono,monospace;font-size:0.72rem;'>v{APP_VERSION}</span>
+        &nbsp;·&nbsp; {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        &nbsp;·&nbsp; MacBook Pro M5 Max · 137GB
+        &nbsp;·&nbsp; <span style='font-weight:600;background:linear-gradient(135deg,#7c3aed,#ec4899 50%,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;'>作者：李准的星小辰</span>
+    </span>
+</div>
+""", unsafe_allow_html=True)

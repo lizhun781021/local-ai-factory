@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 工厂公网访问备忘</title>
+<style>
+  :root { --blue:#002FA7; --dark:#0f172a; --bg:#f5f7fb; --line:#e2e8f0; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--dark); padding:32px 20px; line-height:1.7; }
+  .wrap { max-width:880px; margin:0 auto; }
+  h1 { color:var(--blue); font-size:24px; margin-bottom:6px; }
+  .sub { color:#64748b; font-size:13px; margin-bottom:24px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:22px 26px; margin-bottom:18px; }
+  .card h2 { font-size:16px; color:var(--blue); margin-bottom:14px; border-left:4px solid var(--blue); padding-left:10px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th { background:#f1f5fb; color:#334155; font-weight:600; }
+  .code { background:#0f172a; color:#7dd3fc; padding:2px 8px; border-radius:5px; font-family:"SF Mono",Menlo,monospace; font-size:13px; }
+  .addr { font-size:18px; font-weight:700; color:#0ea5e9; }
+  .pw { font-family:"SF Mono",Menlo,monospace; font-weight:700; color:#d97706; }
+  .flow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; margin:8px 0; }
+  .flow .node { background:#eef4ff; border:1px solid #c7d8ff; border-radius:8px; padding:6px 12px; }
+  .flow .arr { color:var(--blue); font-weight:700; }
+  .warn { background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; padding:10px 14px; font-size:13px; color:#9a3412; margin-top:8px; }
+  .tip { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px 14px; font-size:13px; color:#166534; margin-top:8px; }
+  footer { text-align:center; color:#94a3b8; font-size:12px; margin-top:24px; }
+  code { background:#f1f5f9; padding:1px 6px; border-radius:4px; font-size:12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AI 工厂公网访问备忘</h1>
+    <div class="sub">本地 AI 工厂（MacBook）的智能问答能力经天翼云公网入口，手机随时访问 · 2026-09-16 配置</div>
+  </header>
+
+  <div class="card">
+    <h2>手机访问方式</h2>
+    <table>
+      <tr><th style="width:120px;">访问地址</th><td><span class="addr">http://219.151.184.206:8500</span></td></tr>
+      <tr><th>密码</th><td><span class="pw">lz781021</span></td></tr>
+      <tr><th>说明</th><td>浏览器打开后直接在<b>页面内输入密码</b>登录（无浏览器弹框），即可使用智能问答（文本对话、知识库问答、图片理解等 13 个功能页）；<b>已做手机自适应</b>，多列布局在手机上自动单列堆叠，无横向滚动</td></tr>
+    </table>
+    <div class="warn">安全提示：该密码与天翼云服务器 root 密码高度相似（Lz781021!），页面登录仅一层防护，建议仅本人使用；若长期开放，建议定期更换并避免与服务器密码雷同。</div>
+  </div>
+
+  <div class="card">
+    <h2>架构链路</h2>
+    <div class="flow">
+      <span class="node">手机浏览器</span><span class="arr">→</span>
+      <span class="node">天翼云 219.151.184.206:8500<br>nginx 反代</span><span class="arr">→</span>
+      <span class="node">天翼云 127.0.0.1:8501<br>SSH 反向隧道</span><span class="arr">→</span>
+      <span class="node">本地 Mac AI 工厂<br>Streamlit 8501（页面内登录）</span>
+    </div>
+    <table style="margin-top:12px;">
+      <tr><th>组件</th><th>位置</th><th>说明</th></tr>
+      <tr><td>反向隧道</td><td>本地 launchd</td><td>com.lizhun.ai-factory-tunnel.plist（autossh，KeepAlive 自启）</td></tr>
+      <tr><td>公网入口</td><td>天翼云 nginx</td><td>/etc/nginx/conf.d/ai-factory.conf（监听 8500，WebSocket 反代到 127.0.0.1:8501，已移除 Basic Auth）</td></tr>
+      <tr><td>密码认证</td><td>本地 webui.py</td><td>页面内登录门：AUTH_PASSWORD 变量（默认 lz781021，可用环境变量 AI_FACTORY_PASSWORD 覆盖）</td></tr>
+      <tr><td>安全组</td><td>天翼云控制台</td><td>已放行 TCP 8500（另已有 22、1011）</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>常见故障排查</h2>
+    <table>
+      <tr><th style="width:190px;">症状</th><th>处理</th></tr>
+      <tr><td>公网打开卡住/超时</td><td>先确认本地 8501 正常（<code>curl localhost:8501</code>），再查云端隧道 <code>ss -tlnp | grep 8501</code></td></tr>
+      <tr><td>隧道僵死（CLOSE_WAIT 堆积，转发超时）</td><td>重启本地隧道：<code>kill $(pgrep -f "autossh.*8501")</code>（launchd 自动拉起）；若仍不通，云端杀掉对应 sshd 释放端口再重启</td></tr>
+      <tr><td>改密码</td><td>本地编辑 webui.py 的 AUTH_PASSWORD 变量（或设环境变量 AI_FACTORY_PASSWORD），重启 webui：<code>launchctl unload/load com.local-ai-factory.webui.plist</code></td></tr>
+      <tr><td>nginx 起不来</td><td>确认 80/8500 未被占；<code>nginx -t</code> 查语法</td></tr>
+    </table>
+    <div class="tip">提示：本地 AI 工厂若关机/重启，公网入口会暂时不可用，开机后 launchd 自动恢复隧道，无需手动干预。</div>
+  </div>
+
+  <footer>作者：李准的星小辰 · 2026-09-16</footer>
+</div>
+</body>
+</html>
