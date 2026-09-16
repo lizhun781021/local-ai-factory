@@ -296,67 +296,41 @@
     </div>
   </div>
 
-  <!-- ====== SLIDE 1.5: 模型名片（10分钟汇报速览） ====== -->
-  <div class="slide bg-light dense" data-title="模型名片">
-    <div class="s-head">
+  <!-- ====== SLIDE 1.5: 一页速览（25个案例×10分钟，每个仅24秒） ====== -->
+  <div class="slide bg-light dense" data-title="一页速览">
+    <div class="s-head" style="margin-bottom:clamp(8px,1vw,14px);">
       <div class="idx teal">★</div>
-      <div class="t1">核心模型名片</div>
-      <div class="t2">10 分钟汇报 · 亮点速览</div>
+      <div class="t1">本地 AI 工厂 · 一页速览</div>
+      <div class="t2">全本地多模态 · 手机公网访问 · 数据不出设备</div>
       <div class="line"></div>
     </div>
-    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));">
-      <div class="card">
-        <div class="ic">🧠</div>
-        <h4>Qwen3.8-27B <span style="font-size:clamp(11px,1.1vw,14px);color:var(--teal);font-weight:600;">多模态大模型</span></h4>
-        <p>阿里通义千问最新一代，<b>文本对话 + 图片理解 + 视觉问答</b>三合一。本地常驻 8082 端口，31.5 tps，15GB 显存。</p>
-        <div class="tag">本地常驻 · 8082</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--card-gap);align-items:start;">
+      <!-- 左：核心模型名片 -->
+      <div>
+        <div class="card" style="margin-bottom:var(--card-gap);">
+          <div class="ic">🧠</div>
+          <h4>Qwen3.8-27B <span style="font-size:clamp(10px,1vw,13px);color:var(--teal);font-weight:600;">多模态大模型</span></h4>
+          <p style="font-size:clamp(11px,1.1vw,14px);"><b>文本对话 + 图片理解 + 视觉问答</b>三合一，本地常驻，31.5 tps</p>
+        </div>
+        <div class="card amber" style="margin-bottom:var(--card-gap);">
+          <div class="ic">🎬</div>
+          <h4>MiniMax H3 <span style="font-size:clamp(10px,1vw,13px);color:var(--amber);font-weight:600;">文生视频 / 图生视频</span></h4>
+          <p style="font-size:clamp(11px,1.1vw,14px);"><b>文字描述直接生成 5 秒视频</b>（864×480 / 24fps），带同步音频</p>
+        </div>
+        <div class="card slate">
+          <div class="ic">📚</div>
+          <h4>RAGFlow + FTS5 <span style="font-size:clamp(10px,1vw,13px);color:var(--slate);font-weight:600;">知识库问答</span></h4>
+          <p style="font-size:clamp(11px,1.1vw,14px);"><b>自然语言提问 → 检索 459 篇文档 → 结构化回答</b>，0.8s 检索，带数据溯源</p>
+        </div>
       </div>
-      <div class="card amber">
-        <div class="ic">🎬</div>
-        <h4>MiniMax H3 <span style="font-size:clamp(11px,1.1vw,14px);color:var(--amber);font-weight:600;">文生视频 / 图生视频</span></h4>
-        <p><b>文字描述直接生成 5 秒视频</b>（864×480 / 24fps），带同步音频。ComfyUI 驱动，5GB 显存。</p>
-        <div class="tag">ComfyUI · 8188</div>
-      </div>
-      <div class="card">
-        <div class="ic">🎨</div>
-        <h4>SDXL + SANA <span style="font-size:clamp(11px,1.1vw,14px);color:var(--teal);font-weight:600;">文生图</span></h4>
-        <p><b>文字描述生成 1024×1024 高清图片</b>，SDXL 主力 + SANA 轻量快速双模型。</p>
-        <div class="tag">ComfyUI · 8188</div>
-      </div>
-      <div class="card amber">
-        <div class="ic">🎤</div>
-        <h4>SenseVoice + Seaco-Paraformer <span style="font-size:clamp(11px,1.1vw,14px);color:var(--amber);font-weight:600;">语音识别</span></h4>
-        <p><b>音频转文字 + 说话人分离</b>，SenseVoice 0.78s 极速，Seaco 支持长音频多人分离。</p>
-        <div class="tag">本地 · CPU</div>
-      </div>
-      <div class="card">
-        <div class="ic">🔊</div>
-        <h4>Qwen3-TTS-0.6B <span style="font-size:clamp(11px,1.1vw,14px);color:var(--teal);font-weight:600;">语音合成 + 克隆</span></h4>
-        <p><b>文字转语音，9 种音色 + 声音克隆</b>（X-vector / ICL），10 种语言，自然语言指令控音色。</p>
-        <div class="tag">本地 · 8082</div>
-      </div>
-      <div class="card slate">
-        <div class="ic">📚</div>
-        <h4>RAGFlow + FTS5 <span style="font-size:clamp(11px,1.1vw,14px);color:var(--slate);font-weight:600;">知识库问答</span></h4>
-        <p><b>自然语言提问 → 检索 459 篇文档 → LLM 推理 → 结构化回答</b>，回答带数据溯源，0.8s 检索。</p>
-        <div class="tag">RAGFlow · 9380</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ====== SLIDE 1.6: 智能问答速览（10分钟汇报核心展示） ====== -->
-  <div class="slide bg-teal dense" data-title="智能问答速览">
-    <div class="s-head">
-      <div class="idx teal">★</div>
-      <div class="t1">智能问答 · 10 秒看懂</div>
-      <div class="t2">自然语言提问 → 检索 459 篇文档 → 结构化回答（带溯源）</div>
-      <div class="line"></div>
-    </div>
-    <div class="shots" style="margin-top:clamp(6px,0.8vw,12px);">
-      <div class="shot">
-        <div class="shot-head"><h4>💬 智能问答演示：提问「鹤壁公司7月核心平台基础类收入同比增幅」</h4><p>检索 0.8s + 推理 40.2s → 输出数据表格、全省排名、趋势评价</p></div>
-        <div class="shot-img"><img src="screenshots/qa_demo.png" alt="智能问答演示" style="max-height:520px;object-fit:contain;"></div>
-        <div class="shot-tag">✅ 像聊天一样直接问 → 自动检索工作文档 → AI 推理输出表格+排名+评价，来源文档一键打开</div>
+      <!-- 右：智能问答截图 -->
+      <div class="shot" style="border:1px solid #d1e7e4;border-radius:clamp(10px,1.2vw,16px);overflow:hidden;box-shadow:0 2px 10px rgba(13,148,136,0.08);">
+        <div class="shot-head" style="padding:clamp(8px,1vw,12px) clamp(10px,1.2vw,16px);">
+          <h4 style="font-size:clamp(12px,1.3vw,16px);">💬 智能问答演示</h4>
+          <p style="font-size:clamp(10px,1vw,13px);">提问「鹤壁公司7月核心平台基础类收入同比增幅」</p>
+        </div>
+        <div class="shot-img" style="background:#f1f5f9;"><img src="screenshots/qa_demo.png" alt="智能问答演示" style="width:100%;height:auto;display:block;"></div>
+        <div class="shot-tag" style="padding:clamp(6px,0.8vw,10px) clamp(10px,1.2vw,16px);font-size:clamp(9px,0.95vw,12px);">✅ 检索 0.8s + 推理 40.2s → 输出表格+排名+评价，来源文档一键打开</div>
       </div>
     </div>
   </div>
