@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本地 AI 工厂 · 项目介绍</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root {
+    --teal:#0d9488; --teal-l:#14b8a6; --teal-d:#0f766e;
+    --ink:#134e4a; --text:#334155; --light:#f0fdfa;
+    --amber:#d97706; --amber-l:#f59e0b;
+    --slate:#475569; --slate-l:#64748b;
+    --slide-pad-x: clamp(20px, 6vw, 80px);
+    --slide-pad-y: clamp(16px, 4vw, 48px);
+    --card-gap: clamp(10px, 1.5vw, 16px);
+  }
+  body {
+    font-family:"PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif;
+    background:#0f172a; color:var(--text);
+    -webkit-font-smoothing:antialiased; overflow:hidden;
+  }
+
+  /* ===== Slide Container ===== */
+  #deck { position:relative; width:100vw; height:100vh; overflow:hidden; }
+  .slide {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    display:flex; flex-direction:column; justify-content:center;
+    padding:var(--slide-pad-y) var(--slide-pad-x);
+    opacity:0; pointer-events:none;
+    transition:opacity 0.5s ease, transform 0.5s ease;
+    transform:translateX(40px);
+    overflow-y:auto;
+  }
+  .slide.active { opacity:1; pointer-events:auto; transform:translateX(0); }
+  .slide.prev { transform:translateX(-40px); }
+
+  /* ===== Slide backgrounds ===== */
+  .slide.bg-hero {
+    background:linear-gradient(135deg,#f0fdfa 0%,#ccfbf1 30%,#e6fffb 55%,#f0fdfa 80%,#ecfeff 100%);
+  }
+  .slide.bg-light { background:linear-gradient(180deg,#f8fafc 0%,#f1f5f9 100%); }
+  .slide.bg-teal { background:linear-gradient(135deg,#f0fdfa,#ccfbf1); }
+  .slide.bg-amber { background:linear-gradient(135deg,#fffbeb,#fef3c7); }
+  .slide.bg-slate { background:linear-gradient(135deg,#f8fafc,#e2e8f0); }
+  .slide.bg-dark {
+    background:linear-gradient(135deg,#0f172a,#134e4a); color:#e2e8f0;
+  }
+
+  /* ===== Banner slides ===== */
+  .banner-slide { justify-content:center; align-items:center; text-align:center; padding:clamp(20px,6vw,80px); }
+  .banner-slide .part-label {
+    font-size:clamp(14px,2.2vw,22px); letter-spacing:clamp(3px,0.6vw,6px); font-weight:700; opacity:0.6; margin-bottom:clamp(8px,1.2vw,16px);
+  }
+  .banner-slide h2 {
+    font-size:clamp(28px,5.5vw,52px); font-weight:900; letter-spacing:clamp(1px,0.4vw,4px); margin-bottom:clamp(10px,1.5vw,18px);
+    color:var(--teal);
+  }
+  .banner-slide .sub { font-size:clamp(14px,2vw,22px); font-weight:500; opacity:0.7; }
+
+  /* ===== Content typography ===== */
+  .s-title { font-size:clamp(22px,3.2vw,38px); font-weight:800; color:var(--ink); margin-bottom:6px; }
+  .s-sub { font-size:clamp(13px,1.4vw,18px); color:var(--teal-d); margin-bottom:clamp(16px,2.2vw,28px); font-weight:500; }
+  .s-head {
+    display:flex; align-items:center; gap:clamp(8px,1.1vw,14px); margin-bottom:clamp(14px,2vw,24px);
+    flex-wrap:wrap;
+  }
+  .s-head .idx {
+    width:clamp(34px,3.8vw,48px); height:clamp(34px,3.8vw,48px); border-radius:clamp(8px,1vw,12px); display:flex;
+    align-items:center; justify-content:center; font-size:clamp(16px,2vw,24px);
+    font-weight:800; color:#fff; flex-shrink:0;
+  }
+  .s-head .idx.teal { background:linear-gradient(135deg,var(--teal),var(--teal-l)); box-shadow:0 3px 10px rgba(13,148,136,0.25); }
+  .s-head .idx.amber { background:linear-gradient(135deg,var(--amber),var(--amber-l)); box-shadow:0 3px 10px rgba(217,119,6,0.25); }
+  .s-head .idx.slate { background:linear-gradient(135deg,var(--slate),var(--slate-l)); box-shadow:0 3px 10px rgba(71,85,105,0.25); }
+  .s-head .t1 { font-size:clamp(20px,2.8vw,32px); font-weight:800; color:var(--ink); }
+  .s-head .t2 { font-size:clamp(12px,1.3vw,16px); color:var(--teal-d); margin-left:6px; }
+  .s-head .line { flex:1; height:2px; min-width:20px; background:linear-gradient(90deg,rgba(13,148,136,0.25),transparent); }
+
+  /* ===== KPI cards ===== */
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr)); gap:var(--card-gap); }
+  .kpi {
+    background:#fff; border:1px solid #d1e7e4; border-radius:clamp(10px,1.2vw,16px);
+    padding:clamp(14px,1.6vw,22px) clamp(12px,1.5vw,20px); box-shadow:0 2px 10px rgba(13,148,136,0.06);
+  }
+  .kpi .lab { font-size:clamp(14px,1.4vw,18px); color:#64748b; }
+  .kpi .val { font-size:clamp(22px,3vw,36px); font-weight:800; color:var(--teal); margin-top:8px; font-family:"SF Mono","JetBrains Mono",Menlo,monospace; }
+  .kpi .val small { font-size:clamp(13px,1.4vw,18px); font-weight:600; color:var(--teal-l); }
+  .kpi .note { font-size:clamp(11px,1.1vw,14px); color:#94a3b8; margin-top:8px; line-height:1.5; }
+  .kpi.amber .val { color:var(--amber); } .kpi.amber .val small { color:var(--amber-l); }
+  .kpi.slate .val { color:var(--slate); } .kpi.slate .val small { color:var(--slate-l); }
+
+  /* ===== Cards ===== */
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr)); gap:var(--card-gap); }
+  .cards.two { grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr)); }
+  .card {
+    background:#fff; border:1px solid #d1e7e4; border-radius:clamp(10px,1.2vw,16px);
+    padding:clamp(14px,1.6vw,20px) clamp(14px,1.7vw,22px); box-shadow:0 2px 10px rgba(13,148,136,0.06);
+  }
+  .card .ic { font-size:clamp(16px,1.7vw,22px); margin-bottom:clamp(6px,0.8vw,10px); display:inline-block;
+    background:#f0fdfa; border-radius:clamp(6px,0.8vw,10px); padding:clamp(4px,0.5vw,6px) clamp(6px,0.8vw,10px); }
+  .card.amber .ic { background:#fffbeb; }
+  .card.slate .ic { background:#f1f5f9; }
+  .card h4 { font-size:clamp(15px,1.6vw,20px); font-weight:700; color:var(--ink); margin-bottom:clamp(6px,0.8vw,10px); }
+  .card p { font-size:clamp(12px,1.3vw,16px); color:#475569; line-height:1.7; }
+  .card p b { color:var(--teal); }
+  .card.amber p b { color:var(--amber); }
+  .card.slate p b { color:var(--slate); }
+
+  /* ===== Table ===== */
+  table { width:100%; border-collapse:collapse; background:#fff;
+    border-radius:clamp(10px,1.1vw,14px); overflow:hidden; box-shadow:0 2px 10px rgba(13,148,136,0.06);
+    display:block; overflow-x:auto; }
+  th { background:#f0fdfa; color:var(--ink); font-size:clamp(12px,1.3vw,17px); font-weight:700; padding:clamp(6px,0.9vw,12px); text-align:center; border:1px solid #d1e7e4; white-space:nowrap; }
+  td { font-size:clamp(11px,1.2vw,16px); color:#334155; padding:clamp(6px,0.9vw,12px); text-align:left; border:1px solid #ecfdf5; line-height:1.6; }
+  tr:nth-child(even) td { background:#f8fdfb; }
+  td.c, th.c { text-align:center; }
+  td b { color:var(--ink); }
+  td.tl { color:var(--teal); font-weight:700; white-space:nowrap; }
+  td.am { color:var(--amber); font-weight:700; white-space:nowrap; }
+  td.sl { color:var(--slate); font-weight:700; white-space:nowrap; }
+
+  /* ===== Architecture diagram ===== */
+  .arch { background:#fff; border:1px solid #d1e7e4; border-radius:clamp(12px,1.4vw,18px); padding:clamp(16px,2.2vw,28px) clamp(18px,2.5vw,32px);
+    box-shadow:0 2px 10px rgba(13,148,136,0.06); }
+  .arch .row { display:flex; justify-content:center; gap:clamp(8px,1.4vw,18px); flex-wrap:wrap; }
+  .node { border-radius:clamp(8px,1.1vw,14px); padding:clamp(8px,1.1vw,14px) clamp(12px,1.7vw,22px); font-size:clamp(11px,1.25vw,16px); font-weight:700; text-align:center;
+    min-width:clamp(90px,11vw,140px); color:#fff; box-shadow:0 2px 8px rgba(13,148,136,0.12); line-height:1.4; }
+  .node.teal { background:linear-gradient(135deg,var(--teal),var(--teal-l)); }
+  .node.amber { background:linear-gradient(135deg,var(--amber),var(--amber-l)); }
+  .node.slate { background:linear-gradient(135deg,var(--slate),var(--slate-l)); }
+  .node.gray { background:linear-gradient(135deg,#64748b,#94a3b8); }
+  .node span { font-weight:500; font-size:clamp(9px,1vw,13px); display:block; margin-top:4px; opacity:0.9; }
+  .flow { display:flex; align-items:center; justify-content:center; gap:clamp(6px,0.8vw,10px); margin:clamp(6px,0.8vw,10px) 0; font-size:clamp(10px,1.2vw,15px); color:#94a3b8; flex-wrap:wrap; }
+  .flow .ln { flex:0 0 clamp(20px,2.2vw,28px); text-align:center; font-size:clamp(14px,1.6vw,20px); color:var(--teal-l); }
+  .flow .tag2 { background:#f0fdfa; border:1px solid #99f6e4; color:var(--teal); border-radius:8px; padding:clamp(3px,0.4vw,4px) clamp(8px,1vw,12px); font-size:clamp(10px,1.1vw,14px); font-weight:600; }
+
+  /* ===== Box (dual columns) ===== */
+  .duo { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr)); gap:var(--card-gap); }
+  .duo.two { grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr)); }
+  .box { border-radius:clamp(10px,1.2vw,16px); padding:clamp(14px,1.7vw,22px) clamp(15px,1.9vw,24px); background:#fff; border:1px solid #d1e7e4;
+    box-shadow:0 2px 10px rgba(13,148,136,0.06); }
+  .box h3 { font-size:clamp(15px,1.6vw,20px); font-weight:800; color:var(--ink); margin-bottom:clamp(8px,1.1vw,14px); display:flex; align-items:center; gap:8px; }
+  .box h3 .dot { width:clamp(7px,0.8vw,9px); height:clamp(7px,0.8vw,9px); border-radius:50%; display:inline-block; flex-shrink:0; }
+  .box ul { list-style:none; }
+  .box li { font-size:clamp(12px,1.3vw,16px); color:#475569; line-height:1.8; padding:clamp(4px,0.5vw,7px) 0; border-bottom:1px dashed #e6f7f5; }
+  .box li:last-child { border-bottom:none; }
+  .box li b { color:var(--ink); }
+  .box li .v { color:var(--teal); font-weight:700; }
+
+  /* ===== Scene cards ===== */
+  .scenes { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr)); gap:var(--card-gap); }
+  .scene { background:#fff; border:1px solid #d1e7e4; border-radius:clamp(10px,1.2vw,16px); padding:clamp(14px,1.6vw,20px) clamp(14px,1.7vw,22px);
+    box-shadow:0 2px 10px rgba(13,148,136,0.06); }
+  .scene h4 { font-size:clamp(13px,1.4vw,18px); font-weight:700; color:var(--ink); margin-bottom:clamp(6px,0.8vw,10px); display:flex; align-items:center; gap:8px; }
+  .scene h4 .no { font-size:clamp(11px,1.1vw,14px); background:var(--teal); color:#fff; border-radius:50%; width:clamp(20px,2vw,26px); height:clamp(20px,2vw,26px); display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .scene p { font-size:clamp(12px,1.3vw,16px); color:#475569; line-height:1.75; }
+  .scene p b { color:var(--teal); }
+  .scene .tag { margin-top:clamp(6px,0.8vw,10px); padding:clamp(4px,0.5vw,8px) clamp(8px,1vw,12px); background:#f0fdfa; border:1px solid #99f6e4; border-radius:8px; font-size:clamp(10px,1.1vw,14px); color:var(--teal-d); display:inline-block; font-weight:600; }
+
+  /* ===== Code block ===== */
+  .code {
+    background:#0f172a; border:1px solid rgba(255,255,255,0.12); border-radius:clamp(10px,1.1vw,14px);
+    padding:clamp(12px,1.6vw,20px) clamp(14px,1.9vw,24px);
+    font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    font-size:clamp(11px,1.25vw,16px);
+    line-height:1.8; color:#7dd3c0; overflow-x:auto; margin-top:clamp(8px,1vw,12px);
+  }
+  .code .cm { color:#64748b; }
+
+  /* ===== Hero slide ===== */
+  .hero-tag {
+    display:inline-block; background:#fff; border:1px solid #99f6e4;
+    color:var(--teal); font-size:clamp(13px,1.6vw,20px); padding:clamp(5px,0.7vw,8px) clamp(14px,2vw,26px); border-radius:999px;
+    letter-spacing:clamp(1px,0.2vw,2px); box-shadow:0 2px 6px rgba(13,148,136,0.08);
+  }
+  .hero-title { font-size:clamp(28px,5vw,56px); font-weight:900; color:var(--ink); margin-top:clamp(16px,2.2vw,28px); letter-spacing:clamp(1px,0.3vw,3px); line-height:1.3; }
+  .hero-sub { font-size:clamp(14px,2vw,24px); color:var(--teal-d); margin-top:clamp(10px,1.5vw,18px); font-weight:500; line-height:1.5; max-width:900px; }
+  .hero-meta { display:flex; flex-wrap:wrap; gap:clamp(14px,3vw,40px); margin-top:clamp(20px,3vw,40px); font-size:clamp(14px,1.8vw,22px); color:#475569; }
+  .hero-meta span b { font-size:clamp(20px,2.8vw,32px); margin-right:6px; font-family:"SF Mono","JetBrains Mono",Menlo,monospace; }
+  .hero-meta .b1 b { color:var(--teal); }
+  .hero-meta .b2 b { color:var(--amber); }
+  .hero-meta .b3 b { color:var(--slate); }
+
+  /* ===== End slide ===== */
+  .end-content { text-align:center; color:#e2e8f0; }
+  .end-content h2 { font-size:clamp(28px,4.2vw,48px); font-weight:900; margin-bottom:20px; color:#fff; }
+  .end-content p { font-size:clamp(14px,1.8vw,22px); color:#94a3b8; line-height:1.7; }
+  .end-content .brand { font-size:clamp(18px,2.2vw,26px); color:var(--teal-l); font-weight:700; margin-top:clamp(20px,2.5vw,32px); letter-spacing:clamp(1px,0.3vw,3px); }
+
+  /* ===== Navigation ===== */
+  #nav {
+    position:fixed; bottom:0; left:0; right:0; height:clamp(44px,4.5vw,56px);
+    background:rgba(15,23,42,0.92); backdrop-filter:blur(10px);
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 clamp(12px,2.5vw,32px); z-index:999; border-top:1px solid rgba(255,255,255,0.08);
+  }
+  #nav .left, #nav .right { display:flex; align-items:center; gap:clamp(6px,1vw,14px); }
+  #nav button {
+    background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15);
+    color:#e2e8f0; width:clamp(30px,3.2vw,38px); height:clamp(30px,3.2vw,38px); border-radius:10px; cursor:pointer;
+    font-size:clamp(14px,1.5vw,18px); display:flex; align-items:center; justify-content:center;
+    transition:all 0.2s; flex-shrink:0;
+  }
+  #nav button:hover { background:rgba(255,255,255,0.2); }
+  #nav button:disabled { opacity:0.3; cursor:not-allowed; }
+  #nav .counter { color:#94a3b8; font-size:clamp(11px,1.3vw,16px); font-weight:500; min-width:clamp(48px,6vw,80px); text-align:center; }
+  #nav .progress { display:none; }
+  @media(min-width:700px) {
+    #nav .progress {
+      display:block; flex:1; height:4px; background:rgba(255,255,255,0.1); border-radius:2px; margin:0 clamp(12px,2vw,24px);
+      position:relative;
+    }
+    #nav .progress-bar {
+      position:absolute; top:0; left:0; height:100%; border-radius:2px;
+      background:linear-gradient(90deg,var(--teal),var(--teal-l));
+      transition:width 0.4s ease;
+    }
+  }
+  #nav .title-display { display:none; }
+  @media(min-width:900px) {
+    #nav .title-display { display:block; color:#64748b; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:25vw; }
+  }
+  #nav .fullscreen-btn {
+    background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15);
+    color:#e2e8f0; padding:clamp(5px,0.6vw,8px) clamp(10px,1.3vw,16px); border-radius:10px; cursor:pointer; font-size:clamp(11px,1.2vw,14px);
+    transition:all 0.2s; white-space:nowrap;
+  }
+  #nav .fullscreen-btn:hover { background:rgba(255,255,255,0.2); }
+
+  /* ===== Animations ===== */
+  .slide.active .s-head { animation:slideInLeft 0.5s ease 0.1s both; }
+  .slide.active .kpis { animation:fadeUp 0.5s ease 0.2s both; }
+  .slide.active .cards { animation:fadeUp 0.5s ease 0.2s both; }
+  .slide.active .arch { animation:fadeUp 0.5s ease 0.2s both; }
+  .slide.active table { animation:fadeUp 0.5s ease 0.2s both; }
+  .slide.active .duo { animation:fadeUp 0.5s ease 0.2s both; }
+  .slide.active .scenes { animation:fadeUp 0.5s ease 0.2s both; }
+  .slide.active .code { animation:fadeUp 0.5s ease 0.3s both; }
+  .slide.active .hero-tag { animation:fadeIn 0.6s ease 0.1s both; }
+  .slide.active .hero-title { animation:slideInUp 0.6s ease 0.2s both; }
+  .slide.active .hero-sub { animation:slideInUp 0.6s ease 0.3s both; }
+  .slide.active .hero-meta { animation:slideInUp 0.6s ease 0.4s both; }
+  .slide.active .banner-slide .part-label { animation:fadeIn 0.6s ease 0.1s both; }
+  .slide.active .banner-slide h2 { animation:slideInUp 0.6s ease 0.2s both; }
+  .slide.active .banner-slide .sub { animation:slideInUp 0.6s ease 0.3s both; }
+  .slide.active .end-content h2 { animation:slideInUp 0.6s ease 0.2s both; }
+  .slide.active .end-content p { animation:slideInUp 0.6s ease 0.3s both; }
+  .slide.active .end-content .brand { animation:fadeIn 0.6s ease 0.5s both; }
+
+  @keyframes slideInLeft { from{opacity:0; transform:translateX(-30px);} to{opacity:1; transform:translateX(0);} }
+  @keyframes slideInUp { from{opacity:0; transform:translateY(30px);} to{opacity:1; transform:translateY(0);} }
+  @keyframes fadeUp { from{opacity:0; transform:translateY(20px);} to{opacity:1; transform:translateY(0);} }
+  @keyframes fadeIn { from{opacity:0;} to{opacity:1;} }
+
+  .slide.dense { padding:clamp(14px,3vw,32px) clamp(20px,5vw,64px); }
+  @media(max-width:600px) {
+    .slide.dense .card p { line-height:1.6; }
+  }
+
+  /* ===== Screenshot cards ===== */
+  .shots { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr)); gap:var(--card-gap); align-items:stretch; }
+  .shot {
+    background:#fff; border:1px solid #d1e7e4; border-radius:clamp(10px,1.2vw,16px); overflow:hidden;
+    box-shadow:0 2px 10px rgba(13,148,136,0.08); display:flex; flex-direction:column;
+  }
+  .shot .shot-head { padding:clamp(10px,1.2vw,16px) clamp(12px,1.4vw,18px); border-bottom:1px solid #ecfdf5; background:#f8fdfb; }
+  .shot .shot-head h4 { font-size:clamp(13px,1.4vw,17px); font-weight:700; color:var(--ink); }
+  .shot .shot-head p { font-size:clamp(11px,1.1vw,14px); color:#64748b; margin-top:2px; }
+  .shot .shot-img { flex:1; display:flex; align-items:flex-start; justify-content:center; background:#f1f5f9; overflow:hidden; }
+  .shot .shot-img img { width:100%; height:auto; display:block; border-radius:0; }
+  .shot .shot-tag { padding:clamp(8px,1vw,12px) clamp(12px,1.4vw,18px); font-size:clamp(10px,1.05vw,13px); color:#0f766e; background:#f0fdfa; border-top:1px solid #ecfdf5; font-weight:600; line-height:1.6; }
+
+  /* ===== QA flow diagram ===== */
+  .qaf-low { display:flex; align-items:stretch; justify-content:center; gap:clamp(8px,1.2vw,14px); flex-wrap:wrap; margin-top:clamp(10px,1.2vw,16px); }
+  .qaf-step { flex:1; min-width:clamp(140px,16vw,200px); background:#fff; border:1px solid #d1e7e4; border-radius:clamp(10px,1.2vw,16px); padding:clamp(12px,1.4vw,18px) clamp(12px,1.5vw,20px); box-shadow:0 2px 8px rgba(13,148,136,0.06); text-align:center; }
+  .qaf-step .ic { font-size:clamp(20px,2.4vw,30px); display:block; margin-bottom:clamp(6px,0.8vw,10px); }
+  .qaf-step h4 { font-size:clamp(13px,1.4vw,17px); font-weight:800; color:var(--ink); margin-bottom:clamp(4px,0.5vw,8px); }
+  .qaf-step p { font-size:clamp(11px,1.15vw,14px); color:#475569; line-height:1.6; }
+  .qaf-arrow { display:flex; align-items:center; font-size:clamp(16px,1.8vw,22px); color:var(--teal-l); font-weight:700; flex-shrink:0; }
+</style>
+</head>
+<body>
+
+<div id="deck">
+
+  <!-- ====== SLIDE 1: Cover ====== -->
+  <div class="slide bg-hero active" data-title="封面">
+    <span class="hero-tag">MacBook Pro M5 Max · 137GB · 全本地多模态 AI 环境</span>
+    <h1 class="hero-title">本地 AI 工厂</h1>
+    <div class="hero-sub">所有模型在本地运行，数据不出设备 —— 覆盖文本、视觉、语音、生成全链路的统一工作台</div>
+    <div class="hero-meta">
+      <span class="b1"><b>13</b>个功能页面</span>
+      <span class="b2"><b>10+</b>个本地模型</span>
+      <span class="b3"><b>7</b>个服务端口</span>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 2: Part A Banner ====== -->
+  <div class="slide bg-teal banner-slide" data-title="Part A">
+    <div class="part-label" style="color:var(--teal);">PART A</div>
+    <h2>项目概览</h2>
+    <div class="sub">一台 MacBook，一座 AI 工厂</div>
+  </div>
+
+  <!-- ====== SLIDE 3: What is it ====== -->
+  <div class="slide bg-light" data-title="什么是AI工厂">
+    <div class="s-head">
+      <div class="idx teal">壹</div>
+      <div class="t1">什么是本地 AI 工厂</div>
+      <div class="t2">全本地 · 多模态 · 统一入口</div>
+      <div class="line"></div>
+    </div>
+    <div class="cards two">
+      <div class="card">
+        <div class="ic">🏭</div>
+        <h4>全本地推理</h4>
+        <p>所有大模型、图像生成、语音识别与合成均在 <b>MacBook Pro M5 Max / 137GB</b> 本地运行。<b>数据不出设备</b>，隐私与安全完全可控。</p>
+      </div>
+      <div class="card">
+        <div class="ic">🧩</div>
+        <h4>多模态全覆盖</h4>
+        <p>文本对话、图片理解、视频分析、文生图、文生视频、语音转文字、文字转语音、知识库问答 —— <b>一个 WebUI 全覆盖</b>。</p>
+      </div>
+      <div class="card">
+        <div class="ic">🔀</div>
+        <h4>智能路由</h4>
+        <p>OpenAI 兼容统一入口，根据任务类型<b>自动选择最优模型</b>，支持多级降级链，本地模型与远程模型无缝切换。</p>
+      </div>
+      <div class="card">
+        <div class="ic">📱</div>
+        <h4>公网访问 · 手机可用</h4>
+        <p>经天翼云公网入口，<b>手机浏览器直接访问</b>，页面内密码登录，移动端自适应布局，算力仍在本地 Mac。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 4: Architecture ====== -->
+  <div class="slide bg-teal" data-title="系统架构">
+    <div class="s-head">
+      <div class="idx teal">贰</div>
+      <div class="t1">系统架构</div>
+      <div class="t2">WebUI → 智能路由 → 本地模型</div>
+      <div class="line"></div>
+    </div>
+    <div class="arch">
+      <div class="row">
+        <div class="node teal" style="min-width:200px;">Streamlit WebUI<span>8501 · 13 个功能页面 · 移动端自适应</span></div>
+      </div>
+      <div class="flow"><span class="ln">↕</span><span class="tag2">用户交互 · 侧边栏导航 · 页面内密码登录</span></div>
+      <div class="row">
+        <div class="node amber" style="min-width:200px;">智能路由层<span>8088 代理 · 8086 路由核心</span></div>
+      </div>
+      <div class="flow"><span class="ln">↕</span><span class="tag2">任务分发 · 模型选择 · 降级链</span></div>
+      <div class="row">
+        <div class="node teal">LLM 推理<span>8082 常驻</span></div>
+        <div class="node teal">ComfyUI<span>8188 生图/视频</span></div>
+        <div class="node teal">Ollama<span>11434 快速模型</span></div>
+        <div class="node slate">RAGFlow<span>9380 知识库</span></div>
+      </div>
+      <div class="flow"><span class="ln">↕</span><span class="tag2">模型生命周期管理 · 空闲看门狗自动卸载</span></div>
+      <div class="row">
+        <div class="node gray" style="min-width:120px;">本地存储<span>模型文件</span></div>
+        <div class="node gray" style="min-width:120px;">本地日志<span>/tmp/</span></div>
+        <div class="node gray" style="min-width:120px;">本地索引<span>FTS5 + 向量</span></div>
+      </div>
+    </div>
+    <div style="height:16px"></div>
+    <div class="duo two">
+      <div class="box">
+        <h3><span class="dot" style="background:var(--teal);"></span>公网访问链路</h3>
+        <ul>
+          <li>手机浏览器 → <b>天翼云 8500</b>（nginx 反代 + WebSocket）</li>
+          <li>→ SSH 反向隧道 → <b>本地 8501</b>（launchd 自启）</li>
+          <li>页面内密码登录，算力仍在本地 Mac</li>
+          <li>移动端自适应：≤768px 单列堆叠，无横向滚动</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3><span class="dot" style="background:var(--amber);"></span>知识库问答</h3>
+        <ul>
+          <li>自然语言提问 → <b>LLM 推理</b> + RAGFlow 向量检索 + FTS5</li>
+          <li>459 篇文档<b>每日自动增量同步</b>，回答带数据溯源</li>
+          <li>本地存储、本地检索，数据不出设备</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 5: Services ====== -->
+  <div class="slide bg-light" data-title="服务端口">
+    <div class="s-head">
+      <div class="idx amber">叁</div>
+      <div class="t1">服务端口一览</div>
+      <div class="t2">6 个服务 · launchd 托管 · 一键启停</div>
+      <div class="line"></div>
+    </div>
+    <table>
+      <tr><th class="c" style="width:20%">服务</th><th class="c" style="width:10%">端口</th><th>说明</th><th class="c" style="width:18%">托管方式</th></tr>
+      <tr><td class="c tl">AI 工厂 WebUI</td><td class="c"><b>8501</b></td><td>主界面，Streamlit，13 个功能页面，侧边栏导航，移动端自适应</td><td class="c">launchd</td></tr>
+      <tr><td class="c tl">公网入口</td><td class="c"><b>8500</b></td><td>天翼云 nginx 反代 + WebSocket，SSH 反向隧道到本地 8501</td><td class="c">nginx + autossh</td></tr>
+      <tr><td class="c tl">LLM 常驻服务</td><td class="c"><b>8082</b></td><td>Qwen3.8-27B-4bit OpenAI 兼容 API</td><td class="c">launchd</td></tr>
+      <tr><td class="c tl">OpenAI 兼容代理</td><td class="c"><b>8088</b></td><td>多模型统一入口 + 智能路由 + 控制台</td><td class="c">launchd</td></tr>
+      <tr><td class="c am">ComfyUI</td><td class="c"><b>8188</b></td><td>图片生成 (SDXL/SANA) + 视频生成 (MiniMax H3)</td><td class="c">launchd</td></tr>
+      <tr><td class="c sl">RAGFlow</td><td class="c"><b>9380</b></td><td>知识库问答 (bge-large-zh 向量化) · 代理 8086</td><td class="c">Docker</td></tr>
+      <tr><td class="c sl">Ollama</td><td class="c"><b>11434</b></td><td>gemma4:12b 快速模型 + bge-large-zh 向量嵌入</td><td class="c">launchd</td></tr>
+    </table>
+    <div style="height:14px"></div>
+    <div class="duo two">
+      <div class="box">
+        <h3><span class="dot" style="background:var(--teal);"></span>一键启停</h3>
+        <ul>
+          <li><b>start_all.sh</b> — 启动 LLM + ComfyUI + Ollama</li>
+          <li><b>stop_all.sh</b> — 停止所有服务</li>
+          <li><b>status.sh</b> — 查看运行状态</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3><span class="dot" style="background:var(--amber);"></span>运维工具</h3>
+        <ul>
+          <li><b>ai-idle-watchdog.py</b> — GPU 空闲看门狗，自动卸载</li>
+          <li><b>lifecycle.py</b> — 模型生命周期管理</li>
+          <li><b>rag_sync.py</b> — 知识库每日 9:30 增量同步</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 6: Part B Banner ====== -->
+  <div class="slide bg-amber banner-slide" data-title="Part B">
+    <div class="part-label" style="color:var(--amber);">PART B</div>
+    <h2 style="color:var(--amber);">模型清单</h2>
+    <div class="sub">10+ 本地模型 · 覆盖全模态</div>
+  </div>
+
+  <!-- ====== SLIDE 7: LLM Models ====== -->
+  <div class="slide bg-amber" data-title="文本大模型">
+    <div class="s-head">
+      <div class="idx amber">壹</div>
+      <div class="t1">文本大模型 (LLM)</div>
+      <div class="t2">3 个本地模型 · 自动路由</div>
+      <div class="line"></div>
+    </div>
+    <div class="kpis" style="margin-bottom:clamp(12px,1.5vw,20px);">
+      <div class="kpi"><div class="lab">主力模型</div><div class="val">Qwen3.8 <small>27B-4bit</small></div><div class="note">常驻 8082 端口，多模态兼视觉理解</div></div>
+      <div class="kpi"><div class="lab">MoE 推理</div><div class="val">Qwen3.6 <small>35B-A3B</small></div><div class="note">激活 3B，通用对话/推理</div></div>
+      <div class="kpi"><div class="lab">最快响应</div><div class="val">gemma4 <small>12b</small></div><div class="note">Ollama，短消息/翻译</div></div>
+    </div>
+    <table>
+      <tr><th class="c">模型</th><th class="c">大小</th><th class="c">速度</th><th>用途</th><th class="c">常驻</th></tr>
+      <tr><td class="c tl">Qwen3.8-27B-4bit</td><td class="c"><b>15 GB</b></td><td class="c">~31.5 tps</td><td>日常主力，多模态兼视觉理解</td><td class="c">✅ 8082</td></tr>
+      <tr><td class="c tl">Qwen3.6-35B-A3B-bf16</td><td class="c"><b>65 GB</b></td><td class="c">~30.8 tps</td><td>MoE 通用对话/推理，激活 3B</td><td class="c">按需</td></tr>
+      <tr><td class="c am">gemma4:12b (Ollama)</td><td class="c"><b>7.6 GB</b></td><td class="c">~56.1 tps</td><td>最快响应，短消息/翻译</td><td class="c">✅ 11434</td></tr>
+      <tr><td class="c sl">Qwen3.6-27B (远程)</td><td class="c">—</td><td class="c">—</td><td>vLLM 远程降级备选</td><td class="c">外部</td></tr>
+    </table>
+  </div>
+
+  <!-- ====== SLIDE 8: Vision & Gen Models ====== -->
+  <div class="slide bg-light" data-title="图像与生成模型">
+    <div class="s-head">
+      <div class="idx amber">贰</div>
+      <div class="t1">图像 · 视频生成模型</div>
+      <div class="t2">文生图 + 文生视频 · ComfyUI 驱动</div>
+      <div class="line"></div>
+    </div>
+    <div class="cards">
+      <div class="card amber">
+        <div class="ic">🎨</div>
+        <h4>SDXL Base 1.0</h4>
+        <p>文生图主力模型，<b>1024×1024</b> 分辨率，20 步采样。体积约 7GB，ComfyUI 集成。</p>
+        <div class="tag">本地 · ComfyUI 8188</div>
+      </div>
+      <div class="card amber">
+        <div class="ic">⚡</div>
+        <h4>SANA 1.5 1.6B</h4>
+        <p>轻量级文生图模型，<b>1024×1024</b> FP32 精度。体积约 3GB，快速生成。</p>
+        <div class="tag">本地 · ComfyUI 8188</div>
+      </div>
+      <div class="card amber">
+        <div class="ic">🎬</div>
+        <h4>MiniMax H3 4-bit</h4>
+        <p>文生视频模型，<b>864×480 / 5秒 24fps</b>，带同步音频。体积约 5GB，ComfyUI 集成，开机自启。</p>
+        <div class="tag">本地 · ComfyUI 8188</div>
+      </div>
+      <div class="card">
+        <div class="ic">👁️</div>
+        <h4>Qwen3.8-27B 多模态</h4>
+        <p>兼视觉理解能力，支持<b>图片描述、OCR 识别、视觉问答</b>。与文本对话共用同一模型。</p>
+        <div class="tag">本地 · 8082 常驻</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 9: ASR TTS Models ====== -->
+  <div class="slide bg-teal" data-title="语音模型">
+    <div class="s-head">
+      <div class="idx teal">叁</div>
+      <div class="t1">语音模型 (ASR / TTS)</div>
+      <div class="t2">识别 + 合成 + 克隆 · 全本地</div>
+      <div class="line"></div>
+    </div>
+    <div class="duo two">
+      <div class="box">
+        <h3><span class="dot" style="background:var(--teal);"></span>语音识别 (ASR)</h3>
+        <ul>
+          <li><b>SenseVoiceSmall</b> — 极速识别，CPU 仅 <span class="v">0.78s</span>，适合短音频</li>
+          <li><b>Seaco-Paraformer</b> — 长音频识别 + <span class="v">说话人分离</span> (cam++ 声纹)</li>
+          <li><b>星辰慧记 (云端)</b> — OpenAPI 长音频 + 会议纪要（降级备选）</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3><span class="dot" style="background:var(--amber);"></span>语音合成 (TTS)</h3>
+        <ul>
+          <li><b>Qwen3-TTS-0.6B</b> — <span class="v">9 种预置音色</span>，支持声音克隆 (X-vector / ICL)</li>
+          <li><b>edge-tts (云端)</b> — 微软免费，云端 TTS 备选</li>
+          <li><b>CosyVoice3-0.5B</b> — 本地离线 TTS，无需网络</li>
+          <li>支持 <span class="v">10 种语言</span> + 自然语言指令控制音色</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 10: Knowledge & Embedding ====== -->
+  <div class="slide bg-light" data-title="知识库与嵌入">
+    <div class="s-head">
+      <div class="idx amber">肆</div>
+      <div class="t1">知识库与向量嵌入</div>
+      <div class="t2">RAGFlow + FTS5 双引擎</div>
+      <div class="line"></div>
+    </div>
+    <div class="kpis" style="margin-bottom:clamp(12px,1.5vw,20px);">
+      <div class="kpi"><div class="lab">RAGFlow 文档</div><div class="val">459 <small>篇</small></div><div class="note">bge-large-zh 向量化</div></div>
+      <div class="kpi slate"><div class="lab">FTS5 本地索引</div><div class="val">454 <small>文件</small></div><div class="note">53MB · SQLite FTS5 trigram</div></div>
+      <div class="kpi amber"><div class="lab">同步频率</div><div class="val">每日 <small>9:30</small></div><div class="note">rag_sync.py 增量同步</div></div>
+    </div>
+    <div class="duo two">
+      <div class="box">
+        <h3><span class="dot" style="background:var(--slate);"></span>RAGFlow 向量检索</h3>
+        <ul>
+          <li>Docker 部署，<b>9380 API + 8086 代理</b></li>
+          <li>文档自动解析、分块、向量化</li>
+          <li>知识库问答 + 引用溯源</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3><span class="dot" style="background:var(--teal);"></span>FTS5 全文搜索</h3>
+        <ul>
+          <li>SQLite FTS5 <b>trigram 分词器</b></li>
+          <li>支持 xlsx/pdf/pptx/docx/txt/md</li>
+          <li>关键词搜索 + 分类/扩展名/日期过滤</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 11: Part C Banner ====== -->
+  <div class="slide bg-slate banner-slide" data-title="Part C">
+    <div class="part-label" style="color:var(--slate);">PART C</div>
+    <h2 style="color:var(--slate);">功能模块</h2>
+    <div class="sub">13 个功能页面 · 一个 WebUI 全覆盖</div>
+  </div>
+
+  <!-- ====== SLIDE 12: Features 1 ====== -->
+  <div class="slide bg-light dense" data-title="功能模块 1-7">
+    <div class="s-head">
+      <div class="idx slate">壹</div>
+      <div class="t1">功能模块 (上)</div>
+      <div class="t2">监控 · 对话 · 对比 · 视觉 · 生成</div>
+      <div class="line"></div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <h4><span class="no">1</span>系统监控</h4>
+        <p>CPU/内存/磁盘/GPU <b>实时监控</b>，服务状态一览，模型进程管理。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">2</span>文本对话</h4>
+        <p>多模型对话，支持上下文，<b>Token 统计</b>，mlx-lm / Ollama 双引擎。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">3</span>模型对比</h4>
+        <p>同一 prompt <b>并行调用多个模型</b>，横向对比输出质量与速度。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">4</span>图片理解</h4>
+        <p>图片上传 + AI <b>描述/OCR/问答</b>，Qwen3.8-27B 多模态驱动。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">5</span>视频理解</h4>
+        <p>视频抽帧 + AI 分析，自动提取关键帧进行<b>多模态理解</b>。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">6</span>图片生成</h4>
+        <p>文生图，<b>1024×1024</b>，SDXL / SANA 双模型，ComfyUI API 驱动。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">7</span>视频生成</h4>
+        <p>文生视频，<b>5 秒 24fps</b>，MiniMax H3 4-bit，带同步音频输出。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 13: Features 2 ====== -->
+  <div class="slide bg-teal dense" data-title="功能模块 8-13">
+    <div class="s-head">
+      <div class="idx slate">贰</div>
+      <div class="t1">功能模块 (下)</div>
+      <div class="t2">语音 · 知识库 · 统计 · 日志 · 说明</div>
+      <div class="line"></div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <h4><span class="no">8</span>语音识别</h4>
+        <p>音频转文字，<b>多人说话分离</b>，SenseVoiceSmall / Seaco-Paraformer + cam++ 声纹。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">9</span>语音合成</h4>
+        <p>文字转语音，<b>9 种音色</b>，声音克隆 (X-vector / ICL)，Qwen3-TTS-0.6B。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">10</span>智能问答</h4>
+        <p>知识库问答 + 全文搜索，RAGFlow + FTS5 <b>双引擎</b>检索，详见 Part C 专题页。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">11</span>Token 统计</h4>
+        <p>各模型<b>使用量/费用统计</b>，内置 Token 计数器，可视化图表。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">12</span>日志查看</h4>
+        <p>操作日志 + 模型服务日志，<b>/tmp/ai-factory-activity.log</b>。</p>
+      </div>
+      <div class="scene">
+        <h4><span class="no">13</span>AI 工厂说明</h4>
+        <p>项目文档，Markdown 内嵌，<b>版本信息与使用指南</b>。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 13.5: 智能问答专题 ====== -->
+  <div class="slide bg-teal dense" data-title="智能问答专题">
+    <div class="s-head">
+      <div class="idx teal">叁</div>
+      <div class="t1">智能问答 · 专题详解</div>
+      <div class="t2">RAGFlow 语义检索 + LLM 推理 + FTS5 全文搜索</div>
+      <div class="line"></div>
+    </div>
+    <div class="kpis" style="margin-bottom:clamp(10px,1.2vw,16px);">
+      <div class="kpi"><div class="lab">知识库文档</div><div class="val">459 <small>篇</small></div><div class="note">RAGFlow 向量化</div></div>
+      <div class="kpi amber"><div class="lab">全文索引</div><div class="val">485 <small>文件</small></div><div class="note">58.3 MB · FTS5 trigram</div></div>
+      <div class="kpi slate"><div class="lab">检索耗时</div><div class="val">0.8 <small>s</small></div><div class="note">RAGFlow 语义检索</div></div>
+      <div class="kpi"><div class="lab">全文搜索耗时</div><div class="val">4 <small>ms</small></div><div class="note">SQLite FTS5 毫秒级</div></div>
+    </div>
+    <div class="qaf-low">
+      <div class="qaf-step"><span class="ic">💬</span><h4>自然语言提问</h4><p>无需关键词拼接，像聊天一样直接问</p></div>
+      <div class="qaf-arrow">→</div>
+      <div class="qaf-step"><span class="ic">🔍</span><h4>RAGFlow 语义检索</h4><p>top_k 可调 · 相似度阈值 · 命中溯源文档</p></div>
+      <div class="qaf-arrow">→</div>
+      <div class="qaf-step"><span class="ic">🧠</span><h4>LLM 推理分析</h4><p>本地/远程模型 · 只依据文档不编造</p></div>
+      <div class="qaf-arrow">→</div>
+      <div class="qaf-step"><span class="ic">📊</span><h4>结构化回答</h4><p>Markdown 表格 · 排名 · 趋势评价 · 来源溯源</p></div>
+    </div>
+    <div class="shots" style="margin-top:clamp(10px,1.2vw,16px);">
+      <div class="shot">
+        <div class="shot-head"><h4>💬 智能问答 · 实际演示</h4><p>提问「鹤壁公司7月核心平台基础类收入同比增幅」</p></div>
+        <div class="shot-img"><img src="screenshots/qa_demo.png" alt="智能问答演示"></div>
+        <div class="shot-tag">✅ 检索 0.8s + 推理 40.2s → 输出数据表格、全省排名、趋势评价，来源文档一键打开</div>
+      </div>
+      <div class="shot">
+        <div class="shot-head">
+          <h4>📁 本地全文搜索 FTS5 · 演示</h4>
+          <p>搜索「收入」→ 485 文件全文命中</p>
+        </div>
+        <div class="shot-img"><img src="screenshots/fts_results.png" alt="FTS5搜索结果"></div>
+        <div class="shot-tag">⚡ 4ms 毫秒级命中 · 关键词高亮 · 分类/类型过滤 · 直接打开文件</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 14: Part D Banner ====== -->
+  <div class="slide bg-teal banner-slide" data-title="Part D">
+    <div class="part-label" style="color:var(--teal);">PART D</div>
+    <h2>智能路由与安全</h2>
+    <div class="sub">自动选模型 · 数据不出设备</div>
+  </div>
+
+  <!-- ====== SLIDE 15: Smart Routing ====== -->
+  <div class="slide bg-teal" data-title="智能路由">
+    <div class="s-head">
+      <div class="idx teal">壹</div>
+      <div class="t1">智能路由规则</div>
+      <div class="t2">8088 统一入口 · 自动选模型 · 多级降级</div>
+      <div class="line"></div>
+    </div>
+    <table>
+      <tr><th class="c" style="width:22%">任务类型</th><th class="c" style="width:22%">首选模型</th><th>降级链</th></tr>
+      <tr><td class="c tl">图片理解</td><td class="c">Qwen3.8-27B</td><td>→ Qwen3.6-35B</td></tr>
+      <tr><td class="c tl">代码任务</td><td class="c">Qwen3.8-27B</td><td>→ 远程 Qwen3.6-27B</td></tr>
+      <tr><td class="c tl">推理任务</td><td class="c">Qwen3.6-35B-MoE</td><td>→ Qwen3.8 → 远程</td></tr>
+      <tr><td class="c am">短消息 (≤200 token)</td><td class="c">gemma4:12b</td><td>→ Qwen3.8-27B</td></tr>
+      <tr><td class="c am">长文本 (≥4000 token)</td><td class="c">Qwen3.8-27B</td><td>→ Qwen3.6-35B</td></tr>
+      <tr><td class="c sl">默认兜底</td><td class="c">Qwen3.8-27B</td><td>→ 远程 → Qwen3.6-35B</td></tr>
+    </table>
+    <div class="code" style="margin-top:clamp(12px,1.5vw,20px);">
+      <span class="cm"># OpenAI 兼容 API 调用示例</span><br>
+      curl http://localhost:8088/v1/chat/completions \<br>
+      &nbsp;&nbsp;-H "Content-Type: application/json" \<br>
+      &nbsp;&nbsp;-d '{"model":"auto","messages":[{"role":"user","content":"你好"}]}'
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 16: Data Security ====== -->
+  <div class="slide bg-light" data-title="数据安全">
+    <div class="s-head">
+      <div class="idx teal">贰</div>
+      <div class="t1">数据安全</div>
+      <div class="t2">全本地推理 · 数据不出设备</div>
+      <div class="line"></div>
+    </div>
+    <div class="cards two">
+      <div class="card">
+        <div class="ic">🔒</div>
+        <h4>本地推理</h4>
+        <p>所有模型推理在本地完成，<b>数据不上传</b>。输入输出均留在设备内。</p>
+      </div>
+      <div class="card">
+        <div class="ic">💾</div>
+        <h4>本地存储</h4>
+        <p>知识库文档 (RAGFlow + FTS5) 本地存储，<b>每日自动增量同步</b>。</p>
+      </div>
+      <div class="card">
+        <div class="ic">📝</div>
+        <h4>操作日志</h4>
+        <p>所有操作记录在 <b>/tmp/ai-factory-activity.log</b>，可追溯。</p>
+      </div>
+      <div class="card">
+        <div class="ic">🌐</div>
+        <h4>远程降级</h4>
+        <p>远程 LLM (vLLM) <b>仅作为降级备选</b>，默认不使用，本地优先。</p>
+      </div>
+      <div class="card">
+        <div class="ic">📱</div>
+        <h4>公网安全</h4>
+        <p>公网入口经天翼云 nginx 反代，<b>页面内密码登录</b>（非浏览器弹框），隧道 launchd 自启，数据不经云端。</p>
+      </div>
+      <div class="card">
+        <div class="ic">📐</div>
+        <h4>移动端适配</h4>
+        <p>≤768px 屏幕<b>多列自动单列堆叠</b>，按钮全宽，侧边栏抽屉化，无横向滚动，手机浏览体验流畅。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 17: Version History ====== -->
+  <div class="slide bg-slate" data-title="版本演进">
+    <div class="s-head">
+      <div class="idx slate">叁</div>
+      <div class="t1">版本演进</div>
+      <div class="t2">v1.0 → v2.0 → v2.1 → v2.2</div>
+      <div class="line"></div>
+    </div>
+    <div class="duo">
+      <div class="box">
+        <h3><span class="dot" style="background:var(--teal);"></span>v2.2.0 · 2026-09-16</h3>
+        <ul>
+          <li>公网访问（手机浏览器直接用）</li>
+          <li>页面内密码登录 + 移动端自适应</li>
+          <li>SSH 反向隧道 + nginx 反代</li>
+          <li>rag_sync.py 同名文件 MD5 去重</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3><span class="dot" style="background:var(--amber);"></span>v2.1.0 · 2026-08-24</h3>
+        <ul>
+          <li>WebUI 增强：说明页 + 操作日志</li>
+          <li>RAGFlow 增量同步</li>
+          <li>项目介绍长图</li>
+          <li>FTS5 全文搜索优化</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3><span class="dot" style="background:var(--slate);"></span>v2.0.0 · 2026-08-22</h3>
+        <ul>
+          <li>基准测试全面更新</li>
+          <li>SDXL / SANA 文生图</li>
+          <li>MiniMax H3 文生视频</li>
+          <li>SenseVoice ASR + Qwen3-TTS</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3><span class="dot" style="background:var(--teal-l);"></span>技术栈</h3>
+        <ul>
+          <li><b>MLX</b> — Apple 本地推理框架</li>
+          <li><b>ComfyUI</b> — 图像/视频生成</li>
+          <li><b>Ollama</b> — 快速模型服务</li>
+          <li><b>RAGFlow</b> — 知识库问答</li>
+          <li><b>Streamlit</b> — WebUI 框架</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 18: End ====== -->
+  <div class="slide bg-dark" data-title="结束">
+    <div class="end-content">
+      <h2>谢谢观看</h2>
+      <p>一台 MacBook · 一座 AI 工厂 · 全本地多模态<br>数据不出设备，能力覆盖全链路</p>
+      <div class="brand">李准的星小辰 · 2026-09-16</div>
+      <p style="margin-top:24px; font-size:16px; color:#64748b;">
+        本地 AI 工厂 v2.2.0 · GitHub: lizhun781021/local-ai-factory
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<!-- ====== Navigation Bar ====== -->
+<div id="nav">
+  <div class="left">
+    <button id="prevBtn" title="上一页 (←)">‹</button>
+    <button id="nextBtn" title="下一页 (→)">›</button>
+    <button id="firstBtn" title="首页">⏮</button>
+    <button id="lastBtn" title="末页">⏭</button>
+  </div>
+  <div class="progress">
+    <div class="progress-bar" id="progressBar" style="width:5.3%"></div>
+  </div>
+  <div class="counter" id="counter">1 / 19</div>
+  <div class="title-display" id="titleDisplay">封面</div>
+  <div class="right">
+    <button class="fullscreen-btn" id="fsBtn" title="全屏演示 (F)">⛶ 全屏</button>
+  </div>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const firstBtn = document.getElementById('firstBtn');
+  const lastBtn = document.getElementById('lastBtn');
+  const counter = document.getElementById('counter');
+  const progressBar = document.getElementById('progressBar');
+  const titleDisplay = document.getElementById('titleDisplay');
+  const fsBtn = document.getElementById('fsBtn');
+
+  function showSlide(idx) {
+    if (idx < 0 || idx >= total) return;
+    slides.forEach((s, i) => {
+      s.classList.remove('active', 'prev');
+      if (i === idx) s.classList.add('active');
+      else if (i < idx) s.classList.add('prev');
+    });
+    current = idx;
+    counter.textContent = `${idx + 1} / ${total}`;
+    progressBar.style.width = `${((idx + 1) / total) * 100}%`;
+    titleDisplay.textContent = slides[idx].dataset.title || '';
+    prevBtn.disabled = idx === 0;
+    nextBtn.disabled = idx === total - 1;
+  }
+
+  function next() { if (current < total - 1) showSlide(current + 1); }
+  function prev() { if (current > 0) showSlide(current - 1); }
+
+  prevBtn.addEventListener('click', prev);
+  nextBtn.addEventListener('click', next);
+  firstBtn.addEventListener('click', () => showSlide(0));
+  lastBtn.addEventListener('click', () => showSlide(total - 1));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
+    else if (e.key === 'Home') { e.preventDefault(); showSlide(0); }
+    else if (e.key === 'End') { e.preventDefault(); showSlide(total - 1); }
+    else if (e.key === 'f' || e.key === 'F') { toggleFullscreen(); }
+  });
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      fsBtn.textContent = '⛶ 退出';
+    } else {
+      document.exitFullscreen().catch(() => {});
+      fsBtn.textContent = '⛶ 全屏';
+    }
+  }
+  fsBtn.addEventListener('click', toggleFullscreen);
+
+  document.addEventListener('fullscreenchange', () => {
+    fsBtn.textContent = document.fullscreenElement ? '⛶ 退出' : '⛶ 全屏';
+  });
+
+  // Touch swipe support
+  let touchStartX = 0;
+  document.addEventListener('touchstart', (e) => { touchStartX = e.touches[0].clientX; });
+  document.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 50) { dx < 0 ? next() : prev(); }
+  });
+
+  // Init
+  showSlide(0);
+</script>
+
+</body>
+</html>
