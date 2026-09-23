@@ -3892,144 +3892,128 @@ elif page == "📋 日志查看":
 # ==================== AI 工厂说明页 ====================
 elif page == "📖 AI工厂说明":
     st.title("📖 AI 工厂说明")
+    # 说明页以 HTML 渲染（更美观），内容随版本同步维护
+    intro_html = r"""<style>
+    .ai-wrap { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f2337; line-height: 1.75; }
+    .ai-hero { background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 55%, #0ea5e9 100%); border-radius: 18px; padding: 30px 34px; color: #fff; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(79,70,229,0.25); }
+    .ai-hero .hero-title { font-size: 28px; font-weight: 800; letter-spacing: 1px; margin-bottom: 10px; }
+    .ai-hero .hero-sub { font-size: 15px; opacity: 0.95; margin-bottom: 14px; }
+    .ai-hero .hero-meta { display: inline-block; background: rgba(255,255,255,0.18); border-radius: 20px; padding: 5px 16px; font-size: 13px; backdrop-filter: blur(4px); }
+    .ai-tip { background: linear-gradient(135deg, #ede9fe, #e0f2fe); border: 1px solid #c7d2fe; border-radius: 12px; padding: 12px 18px; font-size: 14px; color: #4338ca; margin-bottom: 24px; }
+    .ai-h2 { font-size: 20px; font-weight: 700; color: #312e81; margin: 28px 0 14px; padding-left: 12px; border-left: 4px solid #7c3aed; }
+    .ai-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 8px; }
+    .ai-card { background: #ffffff; border: 1px solid #eef0f6; border-radius: 14px; padding: 14px 16px; box-shadow: 0 2px 8px rgba(31,35,51,0.04); transition: all .2s; }
+    .ai-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(124,58,237,0.10); border-color: #ddd6fe; }
+    .ai-card .c-emoji { font-size: 24px; }
+    .ai-card .c-name { font-weight: 700; font-size: 15px; margin: 6px 0 4px; color: #312e81; }
+    .ai-card .c-desc { font-size: 13px; color: #52525b; margin-bottom: 6px; }
+    .ai-card .c-stack { font-size: 12px; color: #6d28d9; background: #f5f3ff; border-radius: 6px; padding: 2px 8px; display: inline-block; }
+    .ai-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(31,35,51,0.05); margin: 10px 0 6px; font-size: 14px; }
+    .ai-table th { background: linear-gradient(90deg, #7c3aed, #4f46e5); color: #fff; font-weight: 600; padding: 10px 14px; text-align: left; font-size: 13px; }
+    .ai-table td { padding: 9px 14px; border-top: 1px solid #f1f3f9; color: #333; }
+    .ai-table tr:nth-child(even) td { background: #fafaff; }
+    .ai-table td.mono { font-family: "SF Mono", Menlo, monospace; font-size: 13px; }
+    .ai-sec-title { font-size: 17px; font-weight: 700; color: #312e81; margin: 24px 0 8px; }
+    .ai-code { background: #1e1b3a; color: #c7d2fe; border-radius: 12px; padding: 16px 20px; font-family: "SF Mono", Menlo, monospace; font-size: 13px; line-height: 1.9; overflow-x: auto; }
+    .ai-code .cm { color: #64748b; }
+    .ai-safe { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 14px 20px; margin: 10px 0; }
+    .ai-safe li { margin: 6px 0; font-size: 14px; color: #166534; }
+    @media (max-width: 900px) { .ai-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 600px) { .ai-grid { grid-template-columns: 1fr; } }
+    </style>
+    <div class="ai-intro">
+    <div class="ai-hero">
+      <div class="hero-title">🏭 本地 AI 工厂</div>
+      <div class="hero-sub">基于 MacBook Pro M5 Max / 137GB 搭建的全本地多模态 AI 环境，所有模型在本地运行，无需联网，<b>数据不出设备</b>。</div>
+      <div class="hero-meta">作者：李准的星小辰 · 版本 v{APP_VERSION} · 2026-09-23</div>
+    </div>
+    <div class="ai-tip">💡 <b>后台任务特性</b>：所有耗时任务（模型对比 / 图视频生成 / 语音识别 / 语音合成等）均后台执行，切换菜单不中断、不丢进度，返回自动续显。</div>
 
-    import textwrap
-    intro_md = textwrap.dedent("""\
-    ---
-    ## 🏭 项目简介
+    <div class="ai-h2">🧩 功能模块</div>
+    <div class="ai-grid">
+      <div class="ai-card"><div class="c-emoji">📊</div><div class="c-name">系统监控</div><div class="c-desc">CPU/内存/磁盘/GPU 实时监控，服务状态、模型路由卡片</div><span class="c-stack">psutil · Plotly</span></div>
+      <div class="ai-card"><div class="c-emoji">🧠</div><div class="c-name">文本对话</div><div class="c-desc">多模型对话，支持上下文与 Token 统计（持久化）</div><span class="c-stack">mlx-lm · Ollama</span></div>
+      <div class="ai-card"><div class="c-emoji">🔬</div><div class="c-name">模型对比</div><div class="c-desc">7 项测试 × 多模型全量对比，后台执行切页不丢</div><span class="c-stack">MLX 多模型</span></div>
+      <div class="ai-card"><div class="c-emoji">👁️</div><div class="c-name">图片理解</div><div class="c-desc">图片上传 + AI 描述 / OCR / 问答（后台流式）</div><span class="c-stack">Qwen3.8-27B</span></div>
+      <div class="ai-card"><div class="c-emoji">🎥</div><div class="c-name">视频理解</div><div class="c-desc">视频上传 + AI 分析（后台流式）</div><span class="c-stack">Qwen3.8-27B</span></div>
+      <div class="ai-card"><div class="c-emoji">🎨</div><div class="c-name">图片生成</div><div class="c-desc">文生图 512~1280，三模型可选（后台生成）</div><span class="c-stack">ComfyUI · SDXL/SANA</span></div>
+      <div class="ai-card"><div class="c-emoji">🎬</div><div class="c-name">视频生成</div><div class="c-desc">文生 / 图生视频，5-10s 含同步音频（后台生成）</div><span class="c-stack">MiniMax H3</span></div>
+      <div class="ai-card"><div class="c-emoji">🎤</div><div class="c-name">语音识别</div><div class="c-desc">音频转文字，说话人分离，三引擎（后台识别）</div><span class="c-stack">SenseVoice · Paraformer</span></div>
+      <div class="ai-card"><div class="c-emoji">🔊</div><div class="c-name">语音合成</div><div class="c-desc">文字转语音，9 音色 + 声音克隆（后台合成）</div><span class="c-stack">Qwen3-TTS · edge-tts</span></div>
+      <div class="ai-card"><div class="c-emoji">📚</div><div class="c-name">智能问答</div><div class="c-desc">知识库问答 + 全文搜索，每日自动同步</div><span class="c-stack">RAGFlow · FTS5</span></div>
+      <div class="ai-card"><div class="c-emoji">📈</div><div class="c-name">Token 统计</div><div class="c-desc">使用量统计（持久化重启不丢）+ 一键导出</div><span class="c-stack">JSON 持久化</span></div>
+      <div class="ai-card"><div class="c-emoji">📋</div><div class="c-name">日志查看</div><div class="c-desc">操作日志 + 模型服务日志查看</div><span class="c-stack">活动日志</span></div>
+    </div>
 
-    **本地 AI 工厂** 是基于 MacBook Pro M5 Max / 137GB 搭建的**全本地多模态 AI 环境**，所有模型在本地运行，无需联网，数据不出设备。
+    <div class="ai-h2">🤖 模型清单</div>
+    <div class="ai-sec-title">文本大模型（LLM）</div>
+    <table class="ai-table"><tr><th>模型</th><th>大小</th><th>速度</th><th>用途</th></tr>
+    <tr><td class="mono">Qwen3.8-27B-4bit</td><td>15 GB</td><td>~31.5 tps</td><td>日常主力（常驻 8082），多模态兼视觉理解</td></tr>
+    <tr><td class="mono">Qwen3.6-35B-A3B-bf16</td><td>65 GB</td><td>~30.8 tps</td><td>MoE 通用对话 / 推理，激活 3B</td></tr>
+    <tr><td class="mono">Xing4.0（星辰语义）</td><td>~60 GB</td><td>按需</td><td>中电信自研大模型（8089，质量最高档，按需启动）</td></tr>
+    <tr><td class="mono">gemma4:12b</td><td>7.6 GB</td><td>~56.1 tps</td><td>最快响应，短消息 / 翻译（Ollama）</td></tr></table>
 
-    > 作者：李准的星小辰 · 版本：v{APP_VERSION}
+    <div class="ai-sec-title">图像 / 视频生成</div>
+    <table class="ai-table"><tr><th>模型</th><th>用途</th></tr>
+    <tr><td class="mono">SDXL Base 1.0</td><td>文生图，1024×1024，25 步</td></tr>
+    <tr><td class="mono">SANA 1.5 1.6B</td><td>文生图，1024×1024，28 步，轻量快速</td></tr>
+    <tr><td class="mono">Qwen-Image</td><td>文生图，中文理解最强</td></tr>
+    <tr><td class="mono">MiniMax H3 4-bit</td><td>文生 / 图生视频，5-10 秒 864×480（含同步音频）</td></tr></table>
 
-    > 💡 **后台任务特性**：所有耗时任务（模型对比/图视频生成/语音识别等）均后台执行，**切换菜单不中断、不丢进度**，返回自动续显。
+    <div class="ai-sec-title">语音</div>
+    <table class="ai-table"><tr><th>模型</th><th>类型</th><th>用途</th></tr>
+    <tr><td class="mono">Qwen3-TTS-0.6B</td><td>TTS</td><td>9 种预置音色 + 声音克隆（ICL / X-vector）</td></tr>
+    <tr><td class="mono">SenseVoiceSmall</td><td>ASR</td><td>极速语音识别（≤3min，CPU）</td></tr>
+    <tr><td class="mono">Seaco-Paraformer</td><td>ASR</td><td>长音频识别 + 说话人分离 + 标点</td></tr>
+    <tr><td class="mono">星辰慧记</td><td>ASR</td><td>云端长音频（&gt;10min），带说话人</td></tr>
+    <tr><td class="mono">edge-tts</td><td>TTS</td><td>云端备选</td></tr></table>
 
-    ---
+    <div class="ai-sec-title">知识库与嵌入</div>
+    <table class="ai-table"><tr><th>模型</th><th>用途</th></tr>
+    <tr><td class="mono">RAGFlow</td><td>知识库问答（bge-large-zh 向量化，每日 9:30 自动同步）</td></tr>
+    <tr><td class="mono">bge-large-zh</td><td>向量嵌入，1024 维，via Ollama</td></tr>
+    <tr><td class="mono">FTS5 本地索引</td><td>全文搜索，本地 SQLite</td></tr></table>
 
-    ## 🧩 功能模块
+    <div class="ai-h2">🔀 智能路由</div>
+    <p style="font-size:14px;color:#52525b;margin:6px 0;">统一入口 <code class="mono">localhost:8082</code>（常驻）/ <code class="mono">localhost:8088</code>（代理），OpenAI 兼容 API；配置见 <code class="mono">router_config.yaml</code>，可用状态见系统监控页「🤖 模型路由」卡片。</p>
+    <table class="ai-table"><tr><th>规则</th><th>首选模型</th><th>降级链</th></tr>
+    <tr><td>图片理解</td><td class="mono">Qwen3.8-27B</td><td>→ Qwen3.6-35B</td></tr>
+    <tr><td>代码任务</td><td class="mono">Qwen3.8-27B</td><td>→ 远程 Qwen3.6</td></tr>
+    <tr><td>推理任务</td><td class="mono">Qwen3.6-35B-MoE</td><td>→ Qwen3.8 → 远程</td></tr>
+    <tr><td>短消息 (≤200 token)</td><td class="mono">gemma4:12b</td><td>→ Qwen3.8</td></tr>
+    <tr><td>长文本 (≥4000 token)</td><td class="mono">Qwen3.8-27B</td><td>→ Qwen3.6-35B</td></tr>
+    <tr><td>高难度任务</td><td class="mono">Xing4.0（质量最高）</td><td>→ Qwen3.6-35B</td></tr>
+    <tr><td>默认兜底</td><td class="mono">Qwen3.8-27B</td><td>→ 远程 → Qwen3.6-35B</td></tr></table>
 
-    | 模块 | 功能 | 技术栈 |
-    |------|------|--------|
-    | 📊 系统监控 | CPU/内存/磁盘/GPU 实时监控，服务状态，**模型路由卡片**，模型进程 | Streamlit + psutil + Plotly |
-    | 🧠 文本对话 | 多模型对话，支持上下文，Token 统计（持久化） | mlx-lm / Ollama（Qwen3.8-27B 主力） |
-    | 🔬 模型对比 | 7 项测试 × 多模型全量对比（后台线程，切页不丢） | MLX 多模型并行 |
-    | 👁️ 图片理解 | 图片上传 + AI 描述/OCR/问答（后台流式） | Qwen3.8-27B-4bit（多模态） |
-    | 🎥 视频理解 | 视频上传 + AI 分析（后台流式） | Qwen3.8-27B-4bit |
-    | 🎨 图片生成 | 文生图，512~1280（后台生成） | ComfyUI + SDXL / SANA / Qwen-Image |
-    | 🎬 视频生成 | 文生/图生视频，5-10 秒含同步音频（后台生成） | ComfyUI + MiniMax H3 4-bit |
-    | 🎤 语音识别 | 音频转文字，说话人分离，三引擎（后台识别） | SenseVoice / Seaco-Paraformer + cam++ |
-    | 🔊 语音合成 | 文字转语音，9 音色 + 声音克隆（后台合成） | Qwen3-TTS-0.6B + edge-tts |
-    | 📚 智能问答 | 知识库问答 + 全文搜索 | RAGFlow (9380) + FTS5 本地索引 |
-    | 📈 Token 统计 | 使用量统计（**持久化，重启不丢**）+ 一键导出 | 内置计数器 + JSON |
-    | 📋 日志查看 | AI 工厂操作日志 + 模型服务日志 | /tmp/ai-factory-activity.log |
+    <div class="ai-h2">📡 服务架构</div>
+    <table class="ai-table"><tr><th>服务</th><th>端口</th><th>说明</th></tr>
+    <tr><td class="mono">AI 工厂 WebUI</td><td class="mono">8501</td><td>本页面，Streamlit（launchd 托管）</td></tr>
+    <tr><td class="mono">LLM 常驻服务</td><td class="mono">8082</td><td>Qwen3.8-27B-4bit（launchd 托管）</td></tr>
+    <tr><td class="mono">视觉识别</td><td class="mono">8081</td><td>视觉模型服务</td></tr>
+    <tr><td class="mono">OpenAI 兼容代理</td><td class="mono">8088</td><td>多模型统一入口</td></tr>
+    <tr><td class="mono">ComfyUI</td><td class="mono">8188</td><td>图片 / 视频生成</td></tr>
+    <tr><td class="mono">Xing4.0 本地服务</td><td class="mono">8089</td><td>星辰语义大模型（按需启动）</td></tr>
+    <tr><td class="mono">智能路由</td><td class="mono">8606</td><td>意图识别 + 模型选择</td></tr>
+    <tr><td class="mono">RAGFlow</td><td class="mono">9380 / 8086</td><td>知识库（API / 代理）</td></tr>
+    <tr><td class="mono">Ollama</td><td class="mono">11434</td><td>gemma4:12b + bge-large-zh</td></tr>
+    <tr><td class="mono">公网入口</td><td class="mono">8500（云）</td><td>nginx 反代 + 限流，经 SSH 隧道到本地 8501</td></tr></table>
+    <p style="font-size:13px;color:#6d28d9;margin-top:6px;">一键管理：<code class="mono">./factory.sh [start|stop|restart|status] [all|服务名]</code> · 健康巡检：<code class="mono">./healthcheck.sh</code></p>
 
-    ---
+    <div class="ai-h2">🔒 数据安全</div>
+    <div class="ai-safe">
+      ✅ 所有模型推理在本地完成，数据不上传<br>
+      ✅ 知识库文档（RAGFlow + FTS5）本地存储，每日 9:30 自动增量同步<br>
+      ✅ 操作日志记录于 /tmp/ai-factory-activity.log<br>
+      ✅ 登录密码、API Key 等敏感配置存放在 .env（不入 git），代码不硬编码<br>
+      ✅ 公网入口 nginx 限流（10r/s + 突发 20），防扫描滥用<br>
+      ✅ 远程 LLM（vLLM）仅作为降级备选
+    </div>
 
-    ## 🤖 模型清单
-
-    ### 文本大模型 (LLM)
-    | 模型 | 大小 | 速度 | 用途 |
-    |------|------|------|------|
-    | Qwen3.8-27B-4bit | 15 GB | ~31.5 tps | 日常主力（常驻 8082），多模态兼视觉理解 |
-    | Qwen3.6-35B-A3B-bf16 | 65 GB | ~30.8 tps | MoE 通用对话/推理，激活 3B |
-    | **Xing4.0（星辰语义）** | ~60 GB | 按需 | 中电信自研大模型（8089，质量最高档，开启时启动） |
-    | gemma4:12b | 7.6 GB | ~56.1 tps | 最快响应，短消息/翻译（Ollama） |
-
-    ### 图像/视频生成
-    | 模型 | 用途 |
-    |------|------|
-    | SDXL Base 1.0 | 文生图，1024×1024，25 步 |
-    | SANA 1.5 1.6B | 文生图，1024×1024，28 步，轻量快速 |
-    | Qwen-Image | 文生图，中文理解最强 |
-    | MiniMax H3 4-bit | 文生/图生视频，5-10 秒 864×480（含同步音频） |
-
-    ### 语音
-    | 模型 | 类型 | 用途 |
-    |------|------|------|
-    | Qwen3-TTS-0.6B | TTS | 9 种预置音色 + 声音克隆（ICL / X-vector） |
-    | SenseVoiceSmall | ASR | 极速语音识别（≤3min，CPU） |
-    | Seaco-Paraformer | ASR | 长音频识别 + 说话人分离 + 标点 |
-    | 星辰慧记 | ASR | 云端长音频（>10min），带说话人 |
-    | edge-tts | TTS | 云端备选 |
-
-    ### 知识库与嵌入
-    | 模型 | 用途 |
-    |------|------|
-    | RAGFlow | 知识库问答（bge-large-zh 向量化，每日 9:30 自动同步） |
-    | bge-large-zh | 向量嵌入，1024 维，via Ollama |
-    | FTS5 本地索引 | 全文搜索，本地 SQLite |
-
-    ---
-
-    ## 🔀 智能路由
-
-    统一入口 `http://localhost:8082`（常驻）/ `http://localhost:8088`（代理），OpenAI 兼容 API：
-
-    | 规则 | 首选模型 | 降级链 |
-    |------|----------|--------|
-    | 图片理解 | Qwen3.8-27B | → Qwen3.6-35B |
-    | 代码任务 | Qwen3.8-27B | → 远程 Qwen3.6 |
-    | 推理任务 | Qwen3.6-35B-MoE | → Qwen3.8 → 远程 |
-    | 短消息 (≤200 token) | gemma4:12b | → Qwen3.8 |
-    | 长文本 (≥4000 token) | Qwen3.8-27B | → Qwen3.6-35B |
-    | 高难度任务 | **Xing4.0（质量最高）** | → Qwen3.6-35B |
-    | 默认兜底 | Qwen3.8-27B | → 远程 → Qwen3.6-35B |
-
-    > 路由配置见 `router_config.yaml`，模型可用状态可在系统监控页"🤖 模型路由"卡片查看。
-
-    ---
-
-    ## 📡 服务架构
-
-    | 服务 | 端口 | 说明 |
-    |------|------|------|
-    | AI 工厂 WebUI | 8501 | 本页面，Streamlit（launchd 托管） |
-    | LLM 常驻服务 | 8082 | Qwen3.8-27B-4bit（launchd 托管） |
-    | 视觉识别 | 8081 | 视觉模型服务 |
-    | OpenAI 兼容代理 | 8088 | 多模型统一入口 |
-    | ComfyUI | 8188 | 图片/视频生成 |
-    | Xing4.0 本地服务 | 8089 | 星辰语义大模型（按需启动） |
-    | 智能路由 | 8606 | 意图识别 + 模型选择 |
-    | RAGFlow | 9380 / 8086 | 知识库（API / 代理） |
-    | Ollama | 11434 | gemma4:12b + bge-large-zh |
-    | 公网入口 | 8500（云服务器） | nginx 反代 + 限流，经 SSH 隧道到本地 8501 |
-
-    > 一键管理：`./factory.sh [start|stop|restart|status] [all|服务名]`；健康巡检：`./healthcheck.sh`
-
-    ---
-
-    ## 🔒 数据安全
-
-    - 所有模型推理在本地完成，**数据不上传**
-    - 知识库文档（RAGFlow + FTS5）本地存储，每日 9:30 自动增量同步
-    - 操作日志记录在 `/tmp/ai-factory-activity.log`
-    - 登录密码、API Key 等敏感配置存放在 `.env`（**不入 git**），代码不硬编码
-    - 公网入口 nginx 限流（10r/s + 突发 20），防扫描滥用
-    - 远程 LLM (vLLM) 仅作为降级备选
-
-    ---
-
-    ## 📁 项目目录
-
-    ```
-    local-ai-factory/
-    ├── webui.py                  # 主程序（Streamlit WebUI）
-    ├── factory_api.py           # 模型 API 服务层（LLM/图/视频/语音）
-    ├── rag_sync.py              # RAGFlow 知识库同步脚本
-    ├── ragflow-docker/          # RAGFlow Docker 部署
-    ├── router_config.yaml       # 智能路由配置
-    ├── factory.sh               # 统一服务编排
-    ├── healthcheck.sh           # 健康巡检脚本
-    ├── xing-server.py/sh        # Xing4.0 本地推理服务
-    ├── tests/smoke_test.py      # 页面冒烟测试
-    ├── .env                     # 敏感配置（勿提交）
-    ├── output/                  # 生成内容（图片/视频/音频/报告/日志）
-    └── README.md / CHANGELOG.md # 项目文档
-    ```
-    """)
-    st.markdown(intro_md.replace("{APP_VERSION}", APP_VERSION))
-
-
+    <div class="ai-h2">📁 项目目录</div>
+    <div class="ai-code">local-ai-factory/<br>&nbsp;&nbsp;├── webui.py&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># 主程序（Streamlit WebUI）</span><br>&nbsp;&nbsp;├── factory_api.py&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># 模型 API 服务层（LLM/图/视频/语音）</span><br>&nbsp;&nbsp;├── rag_sync.py&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># RAGFlow 知识库同步脚本</span><br>&nbsp;&nbsp;├── ragflow-docker/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># RAGFlow Docker 部署</span><br>&nbsp;&nbsp;├── router_config.yaml&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># 智能路由配置</span><br>&nbsp;&nbsp;├── factory.sh&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># 统一服务编排</span><br>&nbsp;&nbsp;├── healthcheck.sh&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># 健康巡检脚本</span><br>&nbsp;&nbsp;├── xing-server.py/sh&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># Xing4.0 本地推理服务</span><br>&nbsp;&nbsp;├── tests/smoke_test.py&nbsp;&nbsp;&nbsp;<span class="cm"># 页面冒烟测试</span><br>&nbsp;&nbsp;├── .env&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># 敏感配置（勿提交）</span><br>&nbsp;&nbsp;├── output/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm"># 生成内容（图片/视频/音频/报告/日志）</span><br>&nbsp;&nbsp;└── README.md / CHANGELOG.md&nbsp;<span class="cm"># 项目文档</span></div>
+    </div>
+    """
+    st.html(intro_html.replace("{APP_VERSION}", APP_VERSION))
 # ==================== 底部信息 ====================
 st.divider()
 st.markdown(f"""

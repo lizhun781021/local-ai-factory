@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '8aec5dc0-6807-43b1-9177-26e7edb539f4'
-  PropagateID: '8aec5dc0-6807-43b1-9177-26e7edb539f4'
-  ReservedCode1: 'dc1b4672-b287-419f-8d8a-47792f06c0b4'
-  ReservedCode2: 'dc1b4672-b287-419f-8d8a-47792f06c0b4'
+  ProduceID: 'f15d8e5d-521f-423f-849d-edd83b629f76'
+  PropagateID: 'f15d8e5d-521f-423f-849d-edd83b629f76'
+  ReservedCode1: '07b91765-855b-4c90-9002-233aaa0fe982'
+  ReservedCode2: '07b91765-855b-4c90-9002-233aaa0fe982'
 ---
 
 # 📋 更新日志
@@ -16,6 +16,18 @@ AIGC:
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 版本标签格式：`v{版本号}`
+
+---
+
+## [2.3.2] - 2026-09-23
+
+### 🎨 AI 工厂说明页改为 HTML 渲染
+
+- 说明页由 Markdown 升级为 **HTML + CSS 排版**（`st.html` 渲染），更美观
+- 新增：紫色渐变 Hero 横幅（项目简介/版本/作者）、后台任务特性提示条、功能模块 3 列卡片网格（12 张卡片，hover 微动效）
+- 表格升级：紫色渐变表头 + 斑马纹行（模型清单/智能路由/服务架构）
+- 新增数据安全绿色提示卡、项目目录深色代码块
+- 移动端自适应（卡片 3→2→1 列响应式）
 
 ---
 
