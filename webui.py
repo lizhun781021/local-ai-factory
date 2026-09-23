@@ -45,6 +45,24 @@ OUTPUT_SPEECH_RECOG = os.path.join(OUTPUT_DIR, "语音识别")   # 语音识别�
 for _d in [OUTPUT_IMAGE_GEN, OUTPUT_VIDEO_GEN, OUTPUT_AUDIO_TTS, OUTPUT_REPORTS, OUTPUT_IMAGE_RECOG, OUTPUT_VIDEO_RECOG, OUTPUT_SPEECH_RECOG]:
     os.makedirs(_d, exist_ok=True)
 
+# ==================== 跨线程共享状态（模型对比 + 各耗时页面）====================
+# 说明：Streamlit 后台线程无法访问 st.session_state（缺线程上下文），
+#       且每次 rerun 会以全新命名空间执行脚本（模块级变量不保留）。
+#       故用 st.cache_resource 缓存同一 dict 对象：
+#       - 主线程每次 rerun 调用拿到同一对象；
+#       - 后台线程持有该对象引用直接读写。
+@st.cache_resource(show_spinner=False)
+def _mc_store():
+    return {
+        "running": False, "status": "", "current": 0, "total": 0,
+        "result_ready": False, "all_test_results": None, "all_perf_data": None,
+    }
+
+# 通用后台任务状态容器：各耗时页面用独立 key 存取任务状态
+@st.cache_resource(show_spinner=False)
+def _bt_store():
+    return {}
+
 # Token 统计（内存中持久化）
 if "token_stats" not in st.session_state:
     st.session_state.token_stats = {
@@ -2013,14 +2031,20 @@ elif page == "🧠 文本对话":
 
 
 # ==================== 模型对比页 ====================
+# ==================== 模型对比页 ====================
 elif page == "🔬 模型对比":
     st.title("🔬 模型对比")
     st.caption("选择多个模型进行多维度测试，对比性能和输出质量")
+
+    # ---- 共享状态：st.cache_resource 保证跨 rerun 为同一对象，
+    #      后台线程通过持有引用读写（线程不能访问 st.session_state）----
+    _MC = _mc_store()
 
     # 所有可用模型
     all_models = {
         "Qwen3.8-27B (mlx-lm)": "/Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/Qwen3.8-27B-4bit",
         "Qwen3.6-35B (mlx-lm)": "/Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/Qwen3.6-35B-A3B-bf16",
+        "Xing4.0 (星辰语义大模型)": "xing4.0",
         "gemma-4-12B (Ollama)": "ollama:gemma4:12b",
     }
 
@@ -2034,6 +2058,79 @@ elif page == "🔬 模型对比":
         "🌐 多语言翻译": "将以下中文翻译成英文、日文和法文：'人工智能正在改变我们的生活方式，从医疗健康到教育娱乐，无处不在。'",
         "🎯 指令遵循": "请严格按照以下格式输出：\n1. 第一行输出你的名字\n2. 第二行输出今天是星期几\n3. 第三行用JSON格式输出 {\"color\": \"你最喜欢的颜色\"}",
     }
+
+    # 后台线程执行对比测试，写入模块级 _MC，切换菜单后再回来进度与结果仍保留
+    def _run_compare_worker(params):
+        try:
+            presets = params["test_presets"]
+            sel_models = params["selected_models"]
+            run_count = params["run_count"]
+            max_tokens = params["max_tokens"]
+            num_tests = len(presets)
+            total = len(sel_models) * num_tests * run_count
+            _MC["total"] = total
+            _MC["current"] = 0
+            all_test_results = {}
+            all_perf_data = []
+            current = 0
+            system_prompt = "你是一个有用的AI助手。请用中文回答。"
+            for test_name, test_prompt in presets.items():
+                test_results = []
+                for model_name in sel_models:
+                    model_path = all_models[model_name]
+                    model_runs = []
+                    for run_idx in range(run_count):
+                        current += 1
+                        _MC["current"] = current
+                        _MC["status"] = f"[{current}/{total}] {test_name} → {model_name} (第 {run_idx+1} 次)"
+                        messages = [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": test_prompt}
+                        ]
+                        start_time = time.time()
+                        response, usage = call_llm_api(messages, max_tokens=max_tokens, model_path=model_path)
+                        elapsed = time.time() - start_time
+                        completion_tokens = usage.get("completion_tokens", 0)
+                        total_tokens = usage.get("total_tokens", 0)
+                        prompt_tokens = usage.get("prompt_tokens", 0)
+                        tok_per_sec = completion_tokens / elapsed if elapsed > 0 and completion_tokens > 0 else 0
+                        model_runs.append({
+                            "elapsed": elapsed,
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens,
+                            "tok_per_sec": tok_per_sec,
+                            "response": response
+                        })
+                    avg_elapsed = sum(r["elapsed"] for r in model_runs) / len(model_runs)
+                    avg_tok_per_sec = sum(r["tok_per_sec"] for r in model_runs) / len(model_runs)
+                    avg_completion = sum(r["completion_tokens"] for r in model_runs) / len(model_runs)
+                    result_entry = {
+                        "model": model_name,
+                        "elapsed": avg_elapsed,
+                        "tok_per_sec": avg_tok_per_sec,
+                        "completion_tokens": avg_completion,
+                        "response": model_runs[0]["response"],
+                    }
+                    test_results.append(result_entry)
+                    all_perf_data.append({
+                        "model": model_name,
+                        "test": test_name,
+                        "elapsed": avg_elapsed,
+                        "tok_per_sec": avg_tok_per_sec,
+                        "completion_tokens": avg_completion,
+                    })
+                all_test_results[test_name] = test_results
+            _MC["all_test_results"] = all_test_results
+            _MC["all_perf_data"] = all_perf_data
+            _MC["status"] = "✅ 全部测试完成！"
+            _MC["result_ready"] = True
+        except Exception as e:
+            _MC["status"] = f"❌ 测试出错: {e}"
+            _MC["all_test_results"] = None
+            _MC["all_perf_data"] = None
+        finally:
+            _MC["running"] = False
 
     # 选择要对比的模型
     selected_models = st.multiselect(
@@ -2054,7 +2151,6 @@ elif page == "🔬 模型对比":
         with col2:
             run_count = st.number_input("每个模型每项测试次数", 1, 3, 1, help="多次测试取平均值更准确")
 
-    system_prompt = "你是一个有用的AI助手。请用中文回答。"
     num_tests = len(test_presets)
     total_tests = len(selected_models) * num_tests * run_count
     est_min = total_tests * 20 // 60
@@ -2075,87 +2171,42 @@ elif page == "🔬 模型对比":
         for name, desc in test_descs.items():
             st.markdown(f"- **{name}** — {desc}")
 
-    # 运行对比测试
-    if st.button("🚀 开始全量对比测试", type="primary"):
+    # 点击开始：启动后台线程
+    if st.button("🚀 开始全量对比测试", type="primary", disabled=_MC["running"]):
+        _MC.update({
+            "running": True, "status": "正在启动…", "current": 0, "total": total_tests,
+            "result_ready": False, "all_test_results": None, "all_perf_data": None,
+        })
+        _params = {
+            "test_presets": test_presets,
+            "selected_models": selected_models,
+            "run_count": run_count,
+            "max_tokens": max_tokens,
+        }
+        threading.Thread(target=_run_compare_worker, args=(_params,), daemon=True).start()
+        st.rerun()
+
+    # ---- 运行中：展示进度并自动刷新（切换菜单后回来仍会续显）----
+    if _MC["running"]:
         st.divider()
-        st.subheader("📊 测试结果")
+        st.subheader("📊 测试进度（后台运行中，可切换菜单，返回后自动续显）")
+        _mc_total = _MC["total"] or 1
+        progress = min(_MC["current"] / _mc_total, 1.0)
+        st.progress(progress)
+        st.caption(_MC["status"])
+        time.sleep(1)
+        st.rerun()
 
-        # 数据结构：按测试类型组织
-        all_test_results = {}  # {test_name: [model_result, ...]}
-        all_perf_data = []     # 用于性能图表
+    # ---- 结果展示 ----
+    if _MC["result_ready"] and _MC["all_perf_data"]:
+        all_perf_data = _MC["all_perf_data"]
+        all_test_results = _MC["all_test_results"]
 
-        # 主进度条
-        main_progress = st.progress(0)
-        main_status = st.empty()
-
-        current_test = 0
-
-        for test_name, test_prompt in test_presets.items():
-            test_results = []
-            for model_name in selected_models:
-                model_path = all_models[model_name]
-                model_runs = []
-
-                for run_idx in range(run_count):
-                    current_test += 1
-                    main_status.text(f"[{current_test}/{total_tests}] {test_name} → {model_name} (第 {run_idx+1} 次)")
-
-                    messages = [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": test_prompt}
-                    ]
-                    start_time = time.time()
-                    response, usage = call_llm_api(messages, max_tokens=max_tokens, model_path=model_path)
-                    elapsed = time.time() - start_time
-
-                    completion_tokens = usage.get("completion_tokens", 0)
-                    total_tokens = usage.get("total_tokens", 0)
-                    prompt_tokens = usage.get("prompt_tokens", 0)
-                    tok_per_sec = completion_tokens / elapsed if elapsed > 0 and completion_tokens > 0 else 0
-
-                    model_runs.append({
-                        "elapsed": elapsed,
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": total_tokens,
-                        "tok_per_sec": tok_per_sec,
-                        "response": response
-                    })
-                    main_progress.progress(current_test / total_tests)
-
-                # 取第一次的响应作为展示（多次取平均性能）
-                avg_elapsed = sum(r["elapsed"] for r in model_runs) / len(model_runs)
-                avg_tok_per_sec = sum(r["tok_per_sec"] for r in model_runs) / len(model_runs)
-                avg_completion = sum(r["completion_tokens"] for r in model_runs) / len(model_runs)
-
-                result_entry = {
-                    "model": model_name,
-                    "elapsed": avg_elapsed,
-                    "tok_per_sec": avg_tok_per_sec,
-                    "completion_tokens": avg_completion,
-                    "response": model_runs[0]["response"],
-                }
-                test_results.append(result_entry)
-                all_perf_data.append({
-                    "model": model_name,
-                    "test": test_name,
-                    "elapsed": avg_elapsed,
-                    "tok_per_sec": avg_tok_per_sec,
-                    "completion_tokens": avg_completion,
-                })
-
-            all_test_results[test_name] = test_results
-
-        main_status.text("✅ 全部测试完成！")
-
-        # 性能汇总图表
         st.divider()
         st.subheader("📈 性能对比")
 
         import pandas as pd
         perf_df = pd.DataFrame(all_perf_data)
-
-        # 按模型汇总平均性能
         summary_df = perf_df.groupby("model").agg(
             avg_time=("elapsed", "mean"),
             avg_tok_sec=("tok_per_sec", "mean"),
@@ -2213,13 +2264,14 @@ elif page == "🔬 模型对比":
         st.subheader("📄 生成报告")
 
         if st.button("📥 下载 Markdown 报告"):
+            report_models = [r["model"] for r in next(iter(all_test_results.values()), [])] or list(all_models.keys())
             report = f"""# 模型对比测试报告
 
 **测试时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 ## 测试参数
 - **测试项目**: {num_tests} 项全量测试
-- **测试模型**: {", ".join(selected_models)}
+- **测试模型**: {", ".join(report_models)}
 - **最大输出 Tokens**: {max_tokens}
 - **每项测试次数**: {run_count}
 
@@ -2252,27 +2304,21 @@ elif page == "🔬 模型对比":
                 file_name=report_filename,
                 mime="text/markdown"
             )
-
-
 # ==================== 图片理解页 ====================
 elif page == "👁️ 图片理解":
     st.title("👁️ 图片理解")
     st.caption("基于 Qwen3.8-27B 多模态模型（与文本对话共用同一模型）")
 
-    uploaded_file = st.file_uploader("上传图片", type=["png", "jpg", "jpeg", "webp"])
+    # 共享任务状态（跨 rerun 保留，切换菜单再回来不丢）
+    _st = _bt_store().setdefault("img_understand", {
+        "running": False, "status": "", "done": False, "ok": False,
+        "thinking": "", "answer": "", "full_text": "", "time_str": "",
+        "md_path": "", "error": "",
+    })
 
-    if uploaded_file:
-        st.image(uploaded_file, caption="上传的图片", use_container_width=True)
-
-        prompt = st.text_input("提问", value="详细描述这张图片的内容")
-
-        if st.button("🔍 分析图片", type="primary"):
-            # 保存临时文件
-            temp_path = f"/tmp/upload_{uploaded_file.name}"
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getvalue())
-
-            # 流式生成脚本（写到临时文件，用 argv 传参避免转义问题）
+    # 后台线程：VLM 流式分析，进度与结果写入 _st
+    def _img_u_worker(temp_path, prompt, uploaded_name):
+        try:
             script_path = "/tmp/vlm_stream_gen.py"
             with open(script_path, "w") as f:
                 f.write(r'''import sys, json, contextlib, time
@@ -2306,53 +2352,38 @@ for result in stream_generate(model, processor, prompt=chat_prompt, image=temp_p
                 break
 print(json.dumps({"gen_time": f"{time.time() - t1:.1f}"}), flush=True)
 ''')
-
             import subprocess as sp
             proc = sp.Popen(
                 ["/Users/lizhun/.local/share/TeleAgent/runtimes/python/bin/python3", script_path, temp_path, prompt],
                 stdout=sp.PIPE, stderr=sp.DEVNULL, text=True
             )
-
-            # 流式显示
-            status = st.caption("🔄 正在加载模型（首次约30秒）...")
-            placeholder = st.empty()
+            _st["status"] = "🔄 正在加载模型（首次约30秒）..."
             time_info = {"load": "", "gen": ""}
-            collected = []  # 累积全部文本，避免 write_stream 中断丢失
-
-            def token_generator():
-                for line in proc.stdout:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                        if "load_time" in data:
-                            time_info["load"] = data["load_time"]
-                            status.caption(f"✅ 模型加载完成（{data['load_time']}秒），正在生成回复...")
-                        elif "gen_time" in data:
-                            time_info["gen"] = data["gen_time"]
-                        elif "text" in data:
-                            collected.append(data["text"])
-                            yield data["text"]
-                    except json.JSONDecodeError:
-                        pass
-
-            with placeholder:
+            collected = []
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
                 try:
-                    full_text = st.write_stream(token_generator())
-                except Exception:
-                    full_text = "".join(collected)
-
+                    data = json.loads(line)
+                    if "load_time" in data:
+                        time_info["load"] = data["load_time"]
+                        _st["status"] = f"✅ 模型加载完成（{data['load_time']}秒），正在生成回复..."
+                    elif "gen_time" in data:
+                        time_info["gen"] = data["gen_time"]
+                    elif "text" in data:
+                        collected.append(data["text"])
+                        _st["full_text"] = "".join(collected)
+                except json.JSONDecodeError:
+                    pass
             try:
                 proc.wait(timeout=600)
             except sp.TimeoutExpired:
                 proc.kill()
                 proc.wait()
-            status.empty()
-            placeholder.empty()
 
+            full_text = "".join(collected)
             if full_text.strip():
-                # 时间统计
                 ti_parts = []
                 if time_info["load"]:
                     ti_parts.append(f"模型加载 {time_info['load']}秒")
@@ -2360,7 +2391,6 @@ print(json.dumps({"gen_time": f"{time.time() - t1:.1f}"}), flush=True)
                     ti_parts.append(f"生成 {time_info['gen']}秒")
                 time_str = " · ".join(ti_parts)
 
-                # 分离 thinking 和 answer（Qwen3: 3+ 换行分隔）
                 parts = full_text.split("\n\n\n")
                 if len(parts) >= 2:
                     thinking = parts[0].strip()
@@ -2369,68 +2399,85 @@ print(json.dumps({"gen_time": f"{time.time() - t1:.1f}"}), flush=True)
                     thinking = ""
                     answer = full_text.strip()
 
-                if answer:
-                    st.success("分析结果")
-                    st.write(answer)
-                else:
-                    st.warning("模型未生成最终答案，以下为完整输出：")
-                    st.write(thinking or full_text)
-
-                if time_str:
-                    st.caption(f"⏱️ {time_str}")
-
-                save_content = f"# 图片分析结果\n\n**图片：** {uploaded_file.name}\n**提问：** {prompt}\n**时间：** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n"
+                save_content = f"# 图片分析结果\n\n**图片：** {uploaded_name}\n**提问：** {prompt}\n**时间：** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n"
                 if thinking:
                     save_content += f"## 思考过程\n\n{thinking}\n\n---\n\n"
                 save_content += f"## 分析结果\n\n{answer or full_text}\n"
                 if time_str:
                     save_content += f"\n⏱️ {time_str}\n"
-                result_path = os.path.join(OUTPUT_IMAGE_RECOG, f"img_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
-                with open(result_path, "w", encoding="utf-8") as f:
+                md_path = os.path.join(OUTPUT_IMAGE_RECOG, f"img_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
+                with open(md_path, "w", encoding="utf-8") as f:
                     f.write(save_content)
 
-                st.info(f"📁 已保存到：`{result_path}`")
-                with open(result_path, "rb") as f:
-                    st.download_button("📥 另存为...", f, file_name=os.path.basename(result_path), mime="text/markdown")
-
-                log_activity("图片理解", f"图片={uploaded_file.name} | 提问={prompt[:80]} | {time_str}", duration=float(time_info['gen']) if time_info['gen'] else None)
-
-                if thinking:
-                    with st.expander("💭 思考过程"):
-                        st.write(thinking)
+                _st.update(ok=True, thinking=thinking, answer=answer,
+                           full_text=full_text, time_str=time_str, md_path=md_path,
+                           status="✅ 分析完成")
+                log_activity("图片理解", f"图片={uploaded_name} | 提问={prompt[:80]} | {time_str}",
+                             duration=float(time_info['gen']) if time_info['gen'] else None)
             else:
-                stderr_output = proc.stderr.read() if proc.stderr else ""
-                st.warning("视觉模型加载失败，切换到文本模式")
-                if stderr_output:
-                    with st.expander("错误详情"):
-                        st.code(stderr_output[-500:])
-                response, _ = call_llm_api([
-                    {"role": "user", "content": f"用户上传了一张图片，文件名是 {uploaded_file.name}。请根据文件名猜测可能的内容，并说明需要视觉模型才能真正分析图片。"}
-                ])
-                st.write(response)
+                _st["status"] = "❌ 视觉模型未生成内容"
+        except Exception as e:
+            _st["status"] = f"❌ 分析出错: {e}"
+        finally:
+            _st["done"] = True
+            _st["running"] = False
 
+    uploaded_file = st.file_uploader("上传图片", type=["png", "jpg", "jpeg", "webp"])
 
+    if uploaded_file:
+        st.image(uploaded_file, caption="上传的图片", use_container_width=True)
+        prompt = st.text_input("提问", value="详细描述这张图片的内容")
+
+        if st.button("🔍 分析图片", type="primary", disabled=_st["running"]):
+            temp_path = f"/tmp/upload_{uploaded_file.name}"
+            with open(temp_path, "wb") as f:
+                f.write(uploaded_file.getvalue())
+            _st.update({"running": True, "done": False, "ok": False, "status": "正在启动…",
+                        "thinking": "", "answer": "", "full_text": "", "time_str": "", "md_path": ""})
+            threading.Thread(target=_img_u_worker, args=(temp_path, prompt, uploaded_file.name), daemon=True).start()
+            st.rerun()
+
+    # ---- 运行中：进度与已生成文本（切换菜单后回来仍续显）----
+    if _st["running"]:
+        st.divider()
+        st.subheader("🔍 分析进度（后台运行中，可切换菜单，返回后自动续显）")
+        st.caption(_st["status"])
+        if _st["full_text"]:
+            st.markdown(_st["full_text"][-2000:])
+        time.sleep(1)
+        st.rerun()
+
+    # ---- 完成：展示结果 ----
+    if _st["done"] and _st["ok"]:
+        st.divider()
+        st.success("✅ 分析结果")
+        st.write(_st["answer"] or _st["full_text"])
+        if _st["time_str"]:
+            st.caption(f"⏱️ {_st['time_str']}")
+        st.info(f"📁 已保存到：`{_st['md_path']}`")
+        with open(_st["md_path"], "rb") as f:
+            st.download_button("📥 另存为...", f, file_name=os.path.basename(_st["md_path"]), mime="text/markdown")
+        if _st["thinking"]:
+            with st.expander("💭 思考过程"):
+                st.write(_st["thinking"])
+
+    if _st["done"] and not _st["ok"]:
+        st.error(f"分析失败：{_st['status']}")
 # ==================== 视频理解页 ====================
 elif page == "🎥 视频理解":
     st.title("🎥 视频理解")
     st.caption("基于 Qwen3.8-27B 多模态模型，支持视频内容分析与理解")
 
-    uploaded_video = st.file_uploader("上传视频", type=["mp4", "avi", "mov", "mkv", "webm"])
+    # 共享任务状态（跨 rerun 保留，切换菜单再回来不丢）
+    _st = _bt_store().setdefault("video_understand", {
+        "running": False, "status": "", "done": False, "ok": False,
+        "thinking": "", "answer": "", "full_text": "", "time_str": "",
+        "md_path": "", "error": "",
+    })
 
-    if uploaded_video:
-        # 显示视频预览
-        video_bytes = uploaded_video.getvalue()
-        st.video(video_bytes)
-
-        prompt = st.text_input("提问", value="详细描述这个视频的内容")
-
-        if st.button("🔍 分析视频", type="primary"):
-            # 保存临时文件
-            temp_video_path = f"/tmp/upload_{uploaded_video.name}"
-            with open(temp_video_path, "wb") as f:
-                f.write(video_bytes)
-
-            # 流式生成脚本
+    # 后台线程：VLM 流式分析，进度与结果写入 _st
+    def _vid_u_worker(temp_video_path, prompt, uploaded_name):
+        try:
             script_path = "/tmp/vlm_video_analyze.py"
             with open(script_path, "w") as f:
                 f.write(r'''import sys, json, contextlib, time
@@ -2464,53 +2511,38 @@ for result in stream_generate(model, processor, prompt=chat_prompt, video=video_
                 break
 print(json.dumps({"gen_time": f"{time.time() - t1:.1f}"}), flush=True)
 ''')
-
             import subprocess as sp
             proc = sp.Popen(
                 ["/Users/lizhun/.local/share/TeleAgent/runtimes/python/bin/python3", script_path, temp_video_path, prompt],
                 stdout=sp.PIPE, stderr=sp.DEVNULL, text=True
             )
-
-            # 流式显示
-            status = st.caption("🔄 正在加载模型（首次约30秒）...")
-            placeholder = st.empty()
+            _st["status"] = "🔄 正在加载模型（首次约30秒）..."
             time_info = {"load": "", "gen": ""}
             collected = []
-
-            def token_generator():
-                for line in proc.stdout:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                        if "load_time" in data:
-                            time_info["load"] = data["load_time"]
-                            status.caption(f"✅ 模型加载完成（{data['load_time']}秒），正在生成回复...")
-                        elif "gen_time" in data:
-                            time_info["gen"] = data["gen_time"]
-                        elif "text" in data:
-                            collected.append(data["text"])
-                            yield data["text"]
-                    except json.JSONDecodeError:
-                        pass
-
-            with placeholder:
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
                 try:
-                    full_text = st.write_stream(token_generator())
-                except Exception:
-                    full_text = "".join(collected)
-
+                    data = json.loads(line)
+                    if "load_time" in data:
+                        time_info["load"] = data["load_time"]
+                        _st["status"] = f"✅ 模型加载完成（{data['load_time']}秒），正在生成回复..."
+                    elif "gen_time" in data:
+                        time_info["gen"] = data["gen_time"]
+                    elif "text" in data:
+                        collected.append(data["text"])
+                        _st["full_text"] = "".join(collected)
+                except json.JSONDecodeError:
+                    pass
             try:
                 proc.wait(timeout=600)
             except sp.TimeoutExpired:
                 proc.kill()
                 proc.wait()
-            status.empty()
-            placeholder.empty()
 
+            full_text = "".join(collected)
             if full_text.strip():
-                # 时间统计
                 ti_parts = []
                 if time_info["load"]:
                     ti_parts.append(f"模型加载 {time_info['load']}秒")
@@ -2518,7 +2550,6 @@ print(json.dumps({"gen_time": f"{time.time() - t1:.1f}"}), flush=True)
                     ti_parts.append(f"生成 {time_info['gen']}秒")
                 time_str = " · ".join(ti_parts)
 
-                # 分离 thinking 和 answer（Qwen3: 3+ 换行分隔）
                 parts = full_text.split("\n\n\n")
                 if len(parts) >= 2:
                     thinking = parts[0].strip()
@@ -2527,41 +2558,122 @@ print(json.dumps({"gen_time": f"{time.time() - t1:.1f}"}), flush=True)
                     thinking = ""
                     answer = full_text.strip()
 
-                if answer:
-                    st.success("分析结果")
-                    st.write(answer)
-                else:
-                    st.warning("模型未生成最终答案，以下为完整输出：")
-                    st.write(thinking or full_text)
-
-                if time_str:
-                    st.caption(f"⏱️ {time_str}")
-
-                save_content = f"# 视频分析结果\n\n**视频：** {uploaded_video.name}\n**提问：** {prompt}\n**时间：** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n"
+                save_content = f"# 视频分析结果\n\n**视频：** {uploaded_name}\n**提问：** {prompt}\n**时间：** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n"
                 if thinking:
                     save_content += f"## 思考过程\n\n{thinking}\n\n---\n\n"
                 save_content += f"## 分析结果\n\n{answer or full_text}\n"
                 if time_str:
                     save_content += f"\n⏱️ {time_str}\n"
-                result_path = os.path.join(OUTPUT_VIDEO_RECOG, f"video_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
-                with open(result_path, "w", encoding="utf-8") as f:
+                md_path = os.path.join(OUTPUT_VIDEO_RECOG, f"video_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
+                with open(md_path, "w", encoding="utf-8") as f:
                     f.write(save_content)
 
-                st.info(f"📁 已保存到：`{result_path}`")
-                with open(result_path, "rb") as f:
-                    st.download_button("📥 另存为...", f, file_name=os.path.basename(result_path), mime="text/markdown")
-
-                if thinking:
-                    with st.expander("💭 思考过程"):
-                        st.write(thinking)
+                _st.update(ok=True, thinking=thinking, answer=answer,
+                           full_text=full_text, time_str=time_str, md_path=md_path,
+                           status="✅ 分析完成")
             else:
-                st.warning("视频分析失败，请检查视频格式是否受支持（推荐 mp4 格式）")
+                _st["status"] = "❌ 视频分析失败，请检查视频格式是否受支持（推荐 mp4）"
+        except Exception as e:
+            _st["status"] = f"❌ 分析出错: {e}"
+        finally:
+            _st["done"] = True
+            _st["running"] = False
 
+    uploaded_video = st.file_uploader("上传视频", type=["mp4", "avi", "mov", "mkv", "webm"])
 
+    if uploaded_video:
+        video_bytes = uploaded_video.getvalue()
+        st.video(video_bytes)
+        prompt = st.text_input("提问", value="详细描述这个视频的内容")
+
+        if st.button("🔍 分析视频", type="primary", disabled=_st["running"]):
+            temp_video_path = f"/tmp/upload_{uploaded_video.name}"
+            with open(temp_video_path, "wb") as f:
+                f.write(video_bytes)
+            _st.update({"running": True, "done": False, "ok": False, "status": "正在启动…",
+                        "thinking": "", "answer": "", "full_text": "", "time_str": "", "md_path": ""})
+            threading.Thread(target=_vid_u_worker, args=(temp_video_path, prompt, uploaded_video.name), daemon=True).start()
+            st.rerun()
+
+    # ---- 运行中：进度与已生成文本（切换菜单后回来仍续显）----
+    if _st["running"]:
+        st.divider()
+        st.subheader("🔍 分析进度（后台运行中，可切换菜单，返回后自动续显）")
+        st.caption(_st["status"])
+        if _st["full_text"]:
+            st.markdown(_st["full_text"][-2000:])
+        time.sleep(1)
+        st.rerun()
+
+    # ---- 完成：展示结果 ----
+    if _st["done"] and _st["ok"]:
+        st.divider()
+        st.success("✅ 分析结果")
+        st.write(_st["answer"] or _st["full_text"])
+        if _st["time_str"]:
+            st.caption(f"⏱️ {_st['time_str']}")
+        st.info(f"📁 已保存到：`{_st['md_path']}`")
+        with open(_st["md_path"], "rb") as f:
+            st.download_button("📥 另存为...", f, file_name=os.path.basename(_st["md_path"]), mime="text/markdown")
+        if _st["thinking"]:
+            with st.expander("💭 思考过程"):
+                st.write(_st["thinking"])
+
+    if _st["done"] and not _st["ok"]:
+        st.error(f"分析失败：{_st['status']}")
 # ==================== 图片生成页 ====================
 elif page == "🎨 图片生成":
     st.title("🎨 图片生成")
     st.caption("SANA 1.5 / SDXL 1.0 / Qwen-Image — 通过 ComfyUI API 本地推理")
+
+    # 共享任务状态（跨 rerun 保留，切换菜单再回来不丢）
+    _st = _bt_store().setdefault("img_gen", {
+        "running": False, "done": False, "ok": False, "progress": 0.0,
+        "text": "", "img_path": None, "error": "", "gen_time": 0,
+        "t_start": 0, "model_label": "", "prompt_short": "",
+    })
+
+    # 后台线程：ComfyUI 生成，进度与结果写入 _st
+    def _img_gen_worker(prompt, model_name, width, height, steps, seed, cfg):
+        try:
+            def on_progress(step, total, status):
+                elapsed = time.time() - _st["t_start"]
+                if status == "loading_model":
+                    _st["progress"] = 0.02
+                    _st["text"] = f"🔄 正在加载模型... ({elapsed:.0f}s)"
+                elif status == "sampling":
+                    pct = step / total if total > 0 else 0.0
+                    if step > 0 and elapsed > 0:
+                        eta = elapsed / step * (total - step)
+                        _st["text"] = f"🎨 采样中... 第 {step}/{total} 步 ({elapsed:.0f}s | 预计还剩 {int(eta//60)}分{int(eta%60)}秒)"
+                    else:
+                        _st["text"] = f"🎨 采样中... 第 {step}/{total} 步 ({elapsed:.0f}s)"
+                    _st["progress"] = pct
+                elif status == "done":
+                    _st["progress"] = 0.95
+                    _st["text"] = f"✅ 采样完成，正在解码图像... ({elapsed:.0f}s)"
+
+            img_path, error = generate_image_comfyui(
+                prompt, model=model_name,
+                width=width, height=height,
+                steps=steps, seed=seed, cfg=cfg,
+                progress_callback=on_progress
+            )
+            _st["gen_time"] = time.time() - _st["t_start"]
+            if img_path:
+                _st.update(ok=True, img_path=img_path, progress=1.0,
+                           text=f"生成完成！耗时 {_st['gen_time']:.1f} 秒")
+                log_activity("图片生成", f"模型={model_name} | 尺寸={width}x{height} | 提示词={prompt[:80]}", duration=_st['gen_time'])
+            else:
+                _st["error"] = error
+                _st["text"] = f"生成失败: {error}"
+                log_activity("图片生成", f"模型={model_name} | 失败: {error}", status="error")
+        except Exception as e:
+            _st["error"] = str(e)
+            _st["text"] = f"生成出错: {e}"
+        finally:
+            _st["done"] = True
+            _st["running"] = False
 
     col1, col2 = st.columns([1, 1])
 
@@ -2608,47 +2720,29 @@ elif page == "🎨 图片生成":
                 steps = st.slider("推理步数", 1, 50, default_steps, help="步数越多质量越好但更慢")
                 seed = st.number_input("随机种子", value=-1, help="-1 表示随机")
 
-        if st.button("🎨 生成图片", type="primary", disabled=not comfy_online):
-            progress_bar = st.progress(0.0, text=f"初始化（{model_name.upper()} · {steps}步 · {img_width}x{img_height}）...")
-            status_text = st.empty()
-            t_start = time.time()
+        if st.button("🎨 生成图片", type="primary", disabled=(not comfy_online) or _st["running"]):
+            _st.update(running=True, done=False, ok=False, progress=0.0,
+                       text=f"初始化（{model_name.upper()} · {steps}步 · {img_width}x{img_height}）...",
+                       img_path=None, error="")
+            _st["t_start"] = time.time()
+            _st["model_label"] = model_name
+            _st["prompt_short"] = prompt[:50]
+            threading.Thread(target=_img_gen_worker, args=(prompt, model_name, img_width, img_height, steps, int(seed), cfg), daemon=True).start()
+            st.rerun()
 
-            def on_progress(step, total, status):
-                elapsed = time.time() - t_start
-                if status == "loading_model":
-                    progress_bar.progress(0.02, text=f"🔄 正在加载模型... ({elapsed:.0f}s)")
-                elif status == "sampling":
-                    pct = step / total if total > 0 else 0.0
-                    if step > 0 and elapsed > 0:
-                        eta = elapsed / step * (total - step)
-                        eta_min = int(eta // 60)
-                        eta_sec = int(eta % 60)
-                        progress_bar.progress(pct, text=f"🎨 采样中... 第 {step}/{total} 步 ({elapsed:.0f}s | 预计还剩 {eta_min}分{eta_sec}秒)")
-                    else:
-                        progress_bar.progress(pct, text=f"🎨 采样中... 第 {step}/{total} 步 ({elapsed:.0f}s)")
-                elif status == "done":
-                    progress_bar.progress(0.95, text=f"✅ 采样完成，正在解码图像... ({elapsed:.0f}s)")
-
-            img_path, error = generate_image_comfyui(
-                prompt, model=model_name,
-                width=img_width, height=img_height,
-                steps=steps, seed=seed, cfg=cfg,
-                progress_callback=on_progress
-            )
-            gen_time = time.time() - t_start
-
-            if img_path:
-                progress_bar.progress(1.0, text=f"生成完成！耗时 {gen_time:.1f} 秒")
-                st.image(img_path, caption=f"[{model_name}] {prompt[:50]}", use_container_width=True)
-                img_filename = os.path.basename(img_path)
-                st.info(f"📁 已保存到：`{img_path}`")
-                with open(img_path, "rb") as f:
-                    st.download_button("📥 另存为...", f, file_name=img_filename, mime="image/png")
-                log_activity("图片生成", f"模型={model_name} | 尺寸={img_width}x{img_height} | 提示词={prompt[:80]}", duration=gen_time)
-            else:
-                progress_bar.empty()
-                st.error(f"生成失败: {error}")
-                log_activity("图片生成", f"模型={model_name} | 失败: {error}", status="error")
+        if _st["running"]:
+            st.progress(min(max(_st["progress"], 0.0), 1.0), text=_st["text"])
+            time.sleep(1)
+            st.rerun()
+        elif _st["done"] and _st["ok"]:
+            st.progress(1.0, text=_st["text"])
+            st.image(_st["img_path"], caption=f"[{_st['model_label']}] {_st['prompt_short']}", use_container_width=True)
+            img_filename = os.path.basename(_st["img_path"])
+            st.info(f"📁 已保存到：`{_st['img_path']}`")
+            with open(_st["img_path"], "rb") as f:
+                st.download_button("📥 另存为...", f, file_name=img_filename, mime="image/png")
+        elif _st["done"] and not _st["ok"]:
+            st.error(f"生成失败: {_st['error']}")
 
     with col2:
         st.subheader("📁 历史生成")
@@ -2661,8 +2755,6 @@ elif page == "🎨 图片生成":
             )[:5]
             for img_file in images:
                 st.image(os.path.join(image_dir, img_file), caption=img_file, use_container_width=True)
-
-
 # ==================== 视频生成页 ====================
 elif page == "🎬 视频生成":
     st.title("🎬 视频生成")
@@ -2678,6 +2770,104 @@ elif page == "🎬 视频生成":
         st.warning("⚠️ ComfyUI 未运行（端口 8188），视频生成不可用。请先启动 ComfyUI。")
 
     tab_t2v, tab_i2v = st.tabs(["📝 文生视频", "🖼️ 图生视频"])
+
+    # 共享任务状态（跨 rerun 保留，切换菜单再回来不丢）
+    _bt_v = _bt_store()
+    _st_t2v = _bt_v.setdefault("video_t2v", {
+        "running": False, "done": False, "ok": False, "progress": 0.0,
+        "text": "", "vid_path": None, "error": "", "gen_time": 0, "t_start": 0,
+    })
+    _st_i2v = _bt_v.setdefault("video_i2v", {
+        "running": False, "done": False, "ok": False, "progress": 0.0,
+        "text": "", "vid_path": None, "error": "", "gen_time": 0, "t_start": 0,
+    })
+
+    # 后台线程：文生视频
+    def _t2v_worker(prompt_txt, profile_key, w, h, dur, seed):
+        try:
+            def on_progress(step, total, status):
+                elapsed = time.time() - _st_t2v["t_start"]
+                if status == "loading_model":
+                    _st_t2v["progress"] = 0.02
+                    _st_t2v["text"] = f"🔄 正在加载模型... ({elapsed:.0f}s)"
+                elif status == "sampling":
+                    pct = step / total if total > 0 else 0.0
+                    if step > 0 and elapsed > 0:
+                        eta = elapsed / step * (total - step)
+                        _st_t2v["text"] = f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s | 预计还剩 {int(eta//60)}分{int(eta%60)}秒)"
+                    else:
+                        _st_t2v["text"] = f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s)"
+                    _st_t2v["progress"] = pct
+                elif status == "done":
+                    _st_t2v["progress"] = 0.95
+                    _st_t2v["text"] = f"✅ 推理完成，正在渲染视频... ({elapsed:.0f}s)"
+
+            vid_path, error = generate_video_comfyui(
+                prompt_txt,
+                generation_profile=profile_key,
+                width=w, height=h,
+                duration=dur, seed=seed,
+                progress_callback=on_progress
+            )
+            _st_t2v["gen_time"] = time.time() - _st_t2v["t_start"]
+            if vid_path:
+                _st_t2v.update(ok=True, vid_path=vid_path, progress=1.0,
+                               text=f"生成完成！耗时 {_st_t2v['gen_time']:.0f} 秒")
+                log_activity("视频生成", f"模式={profile_key} | 分辨率={w}x{h} | 时长={dur}s | 提示词={prompt_txt[:60]}", duration=_st_t2v['gen_time'])
+            else:
+                _st_t2v["error"] = error
+                _st_t2v["text"] = f"生成失败: {error}"
+                log_activity("视频生成", f"失败: {error}", status="error")
+        except Exception as e:
+            _st_t2v["error"] = str(e)
+            _st_t2v["text"] = f"生成出错: {e}"
+        finally:
+            _st_t2v["done"] = True
+            _st_t2v["running"] = False
+
+    # 后台线程：图生视频
+    def _i2v_worker(temp_img_path, prompt_txt, dur, w, h, steps, seed):
+        try:
+            def on_progress(step, total, status):
+                elapsed = time.time() - _st_i2v["t_start"]
+                if status == "loading_model":
+                    _st_i2v["progress"] = 0.02
+                    _st_i2v["text"] = f"🔄 正在加载模型... ({elapsed:.0f}s)"
+                elif status == "sampling":
+                    pct = step / total if total > 0 else 0.0
+                    if step > 0 and elapsed > 0:
+                        eta = elapsed / step * (total - step)
+                        _st_i2v["text"] = f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s | 预计还剩 {int(eta//60)}分{int(eta%60)}秒)"
+                    else:
+                        _st_i2v["text"] = f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s)"
+                    _st_i2v["progress"] = pct
+                elif status == "done":
+                    _st_i2v["progress"] = 0.95
+                    _st_i2v["text"] = f"✅ 推理完成，正在渲染视频... ({elapsed:.0f}s)"
+
+            vid_path, error = generate_image_to_video_local(
+                temp_img_path, prompt_txt,
+                duration=dur,
+                width=w, height=h,
+                steps=steps, seed=seed,
+                progress_callback=on_progress
+            )
+            _st_i2v["gen_time"] = time.time() - _st_i2v["t_start"]
+            if os.path.exists(temp_img_path):
+                os.remove(temp_img_path)
+            if vid_path:
+                _st_i2v.update(ok=True, vid_path=vid_path, progress=1.0,
+                               text=f"生成完成！耗时 {_st_i2v['gen_time']:.0f} 秒")
+                log_activity("视频生成(图生)", f"分辨率={w}x{h} | 时长={dur}s | 提示词={prompt_txt[:60]}", duration=_st_i2v['gen_time'])
+            else:
+                _st_i2v["error"] = error
+                _st_i2v["text"] = f"生成失败: {error}"
+        except Exception as e:
+            _st_i2v["error"] = str(e)
+            _st_i2v["text"] = f"生成出错: {e}"
+        finally:
+            _st_i2v["done"] = True
+            _st_i2v["running"] = False
 
     # ==================== 文生视频 Tab ====================
     with tab_t2v:
@@ -2697,7 +2887,6 @@ elif page == "🎬 视频生成":
                     "Full 20 Quality (最高质量)"
                 ], help="Turbo 4: 5步最快 | Turbo 8: 9步平衡 | Full 20: 21步最高质量",
                 key="t2v_profile")
-                # 去掉括号内的中文标注，得到 ComfyUI 需要的 profile key
                 gen_profile_key = gen_profile.split(" (")[0].strip()
             with col2:
                 resolution = st.selectbox("分辨率", [
@@ -2713,54 +2902,32 @@ elif page == "🎬 视频生成":
 
         st.caption("💡 Turbo 4 Fast 模式约 2-4 分钟出视频，Full 20 Quality 约 5-10 分钟。生成含同步音频。")
 
-        if st.button("🎬 生成视频", type="primary", disabled=not comfy_online, key="t2v_btn"):
-            progress_bar = st.progress(0.0, text=f"初始化（MiniMax H3 · {gen_profile_key}）...")
-            t_start = time.time()
+        if st.button("🎬 生成视频", type="primary", disabled=(not comfy_online) or _st_t2v["running"], key="t2v_btn"):
+            _st_t2v.update(running=True, done=False, ok=False, progress=0.0,
+                           text=f"初始化（MiniMax H3 · {gen_profile_key}）...", vid_path=None, error="")
+            _st_t2v["t_start"] = time.time()
+            threading.Thread(target=_t2v_worker, args=(prompt_t2v, gen_profile_key, width, height, duration, int(seed)), daemon=True).start()
+            st.rerun()
 
-            def on_progress_t2v(step, total, status):
-                elapsed = time.time() - t_start
-                if status == "loading_model":
-                    progress_bar.progress(0.02, text=f"🔄 正在加载模型... ({elapsed:.0f}s)")
-                elif status == "sampling":
-                    pct = step / total if total > 0 else 0.0
-                    # 计算预估剩余时间
-                    if step > 0 and elapsed > 0:
-                        eta = elapsed / step * (total - step)
-                        eta_min = int(eta // 60)
-                        eta_sec = int(eta % 60)
-                        progress_bar.progress(pct, text=f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s | 预计还剩 {eta_min}分{eta_sec}秒)")
-                    else:
-                        progress_bar.progress(pct, text=f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s)")
-                elif status == "done":
-                    progress_bar.progress(0.95, text=f"✅ 推理完成，正在渲染视频... ({elapsed:.0f}s)")
-
-            vid_path, error = generate_video_comfyui(
-                prompt_t2v,
-                generation_profile=gen_profile_key,
-                width=width, height=height,
-                duration=duration, seed=int(seed),
-                progress_callback=on_progress_t2v
-            )
-            gen_time = time.time() - t_start
-
-            if vid_path:
-                progress_bar.progress(1.0, text=f"生成完成！耗时 {gen_time:.0f} 秒")
-                st.success("视频生成成功！（含同步音频）")
-                st.video(vid_path)
-                vid_filename = os.path.basename(vid_path)
-                st.info(f"📁 已保存到：`{vid_path}`")
-                with open(vid_path, "rb") as f:
-                    st.download_button("📥 另存为...", f, file_name=vid_filename, mime="video/mp4", key="t2v_dl")
-                audio_files = sorted([f for f in os.listdir(OUTPUT_VIDEO_GEN) if f.endswith('_audio.')])
-                if audio_files:
-                    latest_audio = audio_files[-1]
-                    audio_path = os.path.join(OUTPUT_VIDEO_GEN, latest_audio)
-                    st.caption(f"🎵 音频文件：`{audio_path}`")
-                log_activity("视频生成", f"模式={gen_profile_key} | 分辨率={width}x{height} | 时长={duration}s | 提示词={prompt_t2v[:60]}", duration=gen_time)
-            else:
-                progress_bar.empty()
-                st.error(f"生成失败: {error}")
-                log_activity("视频生成", f"失败: {error}", status="error")
+        if _st_t2v["running"]:
+            st.progress(min(max(_st_t2v["progress"], 0.0), 1.0), text=_st_t2v["text"])
+            time.sleep(1)
+            st.rerun()
+        elif _st_t2v["done"] and _st_t2v["ok"]:
+            st.progress(1.0, text=_st_t2v["text"])
+            st.success("视频生成成功！（含同步音频）")
+            st.video(_st_t2v["vid_path"])
+            vid_filename = os.path.basename(_st_t2v["vid_path"])
+            st.info(f"📁 已保存到：`{_st_t2v['vid_path']}`")
+            with open(_st_t2v["vid_path"], "rb") as f:
+                st.download_button("📥 另存为...", f, file_name=vid_filename, mime="video/mp4", key="t2v_dl")
+            audio_files = sorted([f for f in os.listdir(OUTPUT_VIDEO_GEN) if f.endswith('_audio.')])
+            if audio_files:
+                latest_audio = audio_files[-1]
+                audio_path = os.path.join(OUTPUT_VIDEO_GEN, latest_audio)
+                st.caption(f"🎵 音频文件：`{audio_path}`")
+        elif _st_t2v["done"] and not _st_t2v["ok"]:
+            st.error(f"生成失败: {_st_t2v['error']}")
 
     # ==================== 图生视频 Tab ====================
     with tab_i2v:
@@ -2803,55 +2970,76 @@ elif page == "🎬 视频生成":
 
             st.caption("💡 Turbo 4 Fast 模式约 3-5 分钟出视频。图生视频使用本地 MiniMax H3 模型，无需 API key。")
 
-            if st.button("🎬 图生视频", type="primary", key="i2v_btn"):
-                # 保存上传的图片
+            if st.button("🎬 图生视频", type="primary", disabled=_st_i2v["running"], key="i2v_btn"):
                 temp_img_path = os.path.join(OUTPUT_VIDEO_GEN, f"_i2v_input_{int(time.time())}.png")
                 with open(temp_img_path, "wb") as f:
                     f.write(uploaded_img.getvalue())
+                _st_i2v.update(running=True, done=False, ok=False, progress=0.0,
+                               text="正在加载模型...", vid_path=None, error="")
+                _st_i2v["t_start"] = time.time()
+                threading.Thread(target=_i2v_worker, args=(temp_img_path, prompt_i2v, i2v_duration, i2v_width, i2v_height, i2v_steps, int(i2v_seed)), daemon=True).start()
+                st.rerun()
 
-                progress_bar_i2v = st.progress(0.0, text="正在加载模型...")
-                t_start_i2v = time.time()
+            if _st_i2v["running"]:
+                st.progress(min(max(_st_i2v["progress"], 0.0), 1.0), text=_st_i2v["text"])
+                time.sleep(1)
+                st.rerun()
+            elif _st_i2v["done"] and _st_i2v["ok"]:
+                st.progress(1.0, text=_st_i2v["text"])
+                st.success("图生视频成功！（含同步音频）")
+                st.video(_st_i2v["vid_path"])
+                vid_filename = os.path.basename(_st_i2v["vid_path"])
+                st.info(f"📁 已保存到：`{_st_i2v['vid_path']}`")
+                with open(_st_i2v["vid_path"], "rb") as f:
+                    st.download_button("📥 另存为...", f, file_name=vid_filename, mime="video/mp4", key="i2v_dl")
+            elif _st_i2v["done"] and not _st_i2v["ok"]:
+                st.error(f"生成失败: {_st_i2v['error']}")
 
-                def on_progress_i2v(step, total, status):
-                    elapsed = time.time() - t_start_i2v
-                    if status == "loading_model":
-                        progress_bar_i2v.progress(0.02, text=f"🔄 正在加载模型... ({elapsed:.0f}s)")
-                    elif status == "sampling":
-                        pct = step / total if total > 0 else 0
-                        if step > 0 and elapsed > 0:
-                            eta = elapsed / step * (total - step)
-                            eta_min = int(eta // 60)
-                            eta_sec = int(eta % 60)
-                            progress_bar_i2v.progress(pct, text=f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s | 预计还剩 {eta_min}分{eta_sec}秒)")
-                        else:
-                            progress_bar_i2v.progress(pct, text=f"🎬 推理中... 第 {step}/{total} 步 ({elapsed:.0f}s)")
-                    elif status == "done":
-                        progress_bar_i2v.progress(0.95, text=f"✅ 推理完成，正在渲染视频... ({elapsed:.0f}s)")
-
-                vid_path, error = generate_image_to_video_local(
-                    temp_img_path, prompt_i2v,
-                    duration=i2v_duration,
-                    width=i2v_width, height=i2v_height,
-                    steps=i2v_steps, seed=int(i2v_seed),
-                    progress_callback=on_progress_i2v
-                )
-                gen_time_i2v = time.time() - t_start_i2v
-
-                # 清理临时文件
-                if os.path.exists(temp_img_path):
-                    os.remove(temp_img_path)
-
-                if vid_path:
-                    progress_bar_i2v.progress(1.0, text=f"生成完成！耗时 {gen_time_i2v:.0f} 秒")
-                    st.success("图生视频成功！（含同步音频）")
-                    st.video(vid_path)
-                    vid_filename = os.path.basename(vid_path)
-                    st.info(f"📁 已保存到：`{vid_path}`")
-                    with open(vid_path, "rb") as f:
-                        st.download_button("📥 另存为...", f, file_name=vid_filename, mime="video/mp4", key="i2v_dl")
-                else:
-                    progress_bar_i2v.empty()
-                    st.error(f"生成失败: {error}")
+    # 恢复最近视频（从 ComfyUI history 捞回会话中断丢失的视频）
+    if comfy_online:
+        with st.expander("🔧 恢复最近视频（会话中断/超时后捞回）"):
+            if st.button("🔎 扫描 ComfyUI 未搬回的视频", key="recover_videos_btn"):
+                try:
+                    _recover_url = "http://localhost:8188"
+                    hist = requests.get(f"{_recover_url}/history", timeout=10).json()
+                    recovered = []
+                    existing_files = set(os.listdir(OUTPUT_VIDEO_GEN)) if os.path.exists(OUTPUT_VIDEO_GEN) else set()
+                    for pid, info in sorted(hist.items(), key=lambda x: x[1].get("status", {}).get("messages", [[0,{}]])[0][1].get("timestamp", 0) if x[1].get("status",{}).get("messages") else 0, reverse=True):
+                        if not info.get("status", {}).get("completed", False):
+                            continue
+                        outputs = info.get("outputs", {})
+                        for node_id, node_out in outputs.items():
+                            if "images" in node_out:
+                                for vid in node_out["images"]:
+                                    fname = vid.get("filename", "")
+                                    if fname.endswith(('.mp4', '.webm', '.gif')):
+                                        vid_url = f"{_recover_url}/view?filename={fname}&subfolder={vid.get('subfolder','')}&type={vid.get('type','output')}"
+                                        vid_resp = requests.get(vid_url, timeout=60, stream=True)
+                                        content = vid_resp.content
+                                        new_path = os.path.join(OUTPUT_VIDEO_GEN, f"minimax_h3_{int(time.time())}_{node_id}.mp4")
+                                        with open(new_path, "wb") as f:
+                                            f.write(content)
+                                        recovered.append(f"视频: {fname} → {os.path.basename(new_path)}")
+                            if "audio" in node_out:
+                                for aud in node_out["audio"]:
+                                    fname = aud.get("filename", "")
+                                    if fname.endswith(('.flac', '.wav')):
+                                        aud_url = f"{_recover_url}/view?filename={fname}&subfolder={aud.get('subfolder','')}&type={aud.get('type','output')}"
+                                        aud_resp = requests.get(aud_url, timeout=60)
+                                        aud_ext = os.path.splitext(fname)[1]
+                                        new_path = os.path.join(OUTPUT_VIDEO_GEN, f"minimax_h3_{int(time.time())}_audio{aud_ext}")
+                                        with open(new_path, "wb") as f:
+                                            f.write(aud_resp.content)
+                                        recovered.append(f"音频: {fname} → {os.path.basename(new_path)}")
+                    if recovered:
+                        st.success(f"恢复完成！共搬回 {len(recovered)} 个文件：")
+                        for r in recovered:
+                            st.text(f"  ✓ {r}")
+                        st.rerun()
+                    else:
+                        st.info("没有发现未搬回的视频。")
+                except Exception as e:
+                    st.error(f"扫描失败: {e}")
 
     # 显示已有视频（两个 tab 共享）
     st.divider()
@@ -2865,17 +3053,63 @@ elif page == "🎬 视频生成":
         )[:5]
         for vid in videos:
             st.video(os.path.join(video_dir, vid))
-
-
 # ==================== 语音识别页 ====================
 elif page == "🎤 语音识别":
     st.title("🎤 语音识别")
     st.caption("本地三引擎 ASR：SenseVoiceSmall（≤3min，CPU，最快）| Seaco-Paraformer（中文专用，内置说话人分离+标点+热词）| 星辰慧记（>10min，云端，带说话人分离）")
     st.info("🗣️ 说话人分离：Seaco-Paraformer 和 SenseVoice 内置支持（cam++ 声纹模型）。")
 
+    # 共享任务状态（跨 rerun 保留，切换菜单再回来不丢）
+    _st = _bt_store().setdefault("asr", {
+        "running": False, "done": False, "ok": False, "status": "",
+        "logs": [], "data": None, "md_path": "", "json_path": "", "error": "",
+    })
+
     # 语音识别三引擎脚本（voice-suite 技能）
     _VOICE_SUITE_SCRIPT = os.path.expanduser("~/.config/TeleAgent/skills/voice-suite/scripts/transcribe.py")
     _TRANSCRIBE_OK = os.path.exists(_VOICE_SUITE_SCRIPT)
+
+    # 后台线程：执行 ASR 子进程，进度与结果写入 _st
+    def _asr_worker(cmd, audio_name):
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            _st["status"] = "🔄 识别中...（首次会加载模型，请耐心等待）"
+            log_lines = []
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                log_lines.append(line)
+                _st["logs"] = log_lines[-20:]
+                if line.startswith("音频时长") or line.startswith("选择引擎") or line.startswith("引擎:"):
+                    _st["status"] = line
+            proc.wait(timeout=3600)
+
+            if proc.returncode == 0 and os.path.exists(_st["json_path"]):
+                with open(_st["json_path"], "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                md_path = os.path.join(OUTPUT_SPEECH_RECOG, f"asr_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
+                md_content = f"# 语音识别结果\n\n- 引擎: {data['engine']}\n- 音频时长: {data.get('audio_duration_s', 0)}s\n- 总耗时: {data.get('total_time_s', 0)}s\n\n## 完整文本\n\n{data['text']}\n\n"
+                if data.get("segments"):
+                    md_content += "## 分段信息\n\n"
+                    for seg in data["segments"]:
+                        spk_val = seg.get("speaker")
+                        spk = f" [说话人 {spk_val}]" if spk_val is not None else ""
+                        md_content += f"- {seg.get('start_ms', 0)/1000:.1f}s-{seg.get('end_ms', 0)/1000:.1f}s{spk}: {seg.get('text', '')}\n"
+                with open(md_path, "w", encoding="utf-8") as f:
+                    f.write(md_content)
+                _st.update(ok=True, data=data, md_path=md_path, status="✅ 识别完成")
+                log_activity("语音识别", f"引擎={data['engine']} | 音频={audio_name} | 时长={data.get('audio_duration_s', 0)}s | 耗时={data.get('total_time_s', 0)}s", duration=data.get('total_time_s', 0))
+            else:
+                _st["error"] = "".join(log_lines)[-500:]
+                _st["status"] = f"❌ 识别失败: {_st['error'][-120:]}"
+                log_activity("语音识别", f"音频={audio_name}", status="error")
+        except Exception as e:
+            _st["error"] = str(e)
+            _st["status"] = f"❌ 识别出错: {e}"
+        finally:
+            _st["done"] = True
+            _st["running"] = False
 
     uploaded_audio = st.file_uploader("上传音频文件", type=["mp3", "wav", "m4a", "flac", "aac", "ogg", "pcm"])
 
@@ -2897,7 +3131,7 @@ elif page == "🎤 语音识别":
         with col_mode:
             speech_mode = st.radio("说话模式（星辰慧记引擎生效）", ["多人", "单人"], horizontal=True)
 
-        if st.button("🎤 开始识别", type="primary"):
+        if st.button("🎤 开始识别", type="primary", disabled=_st["running"]):
             # 保存临时文件
             temp_path = f"/tmp/asr_input_{int(time.time())}_{uploaded_audio.name}"
             with open(temp_path, "wb") as f:
@@ -2919,78 +3153,171 @@ elif page == "🎤 语音识别":
                 cmd += ["--speech-mode", "1" if speech_mode == "单人" else "-1"]
                 if enable_diarization:
                     cmd += ["--diarization"]
+                _st.update(running=True, done=False, ok=False, status="🔄 识别中...（首次会加载模型，请耐心等待）",
+                           logs=[], data=None, md_path="", json_path=result_json, error="")
+                threading.Thread(target=_asr_worker, args=(cmd, uploaded_audio.name), daemon=True).start()
+                st.rerun()
 
-                with st.spinner("识别中...（首次会加载模型，请耐心等待）"):
-                    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                    log_lines = []
-                    for line in proc.stdout:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        log_lines.append(line)
-                        # 实时显示进度日志
-                        if line.startswith("音频时长") or line.startswith("选择引擎") or line.startswith("引擎:"):
-                            st.info(line)
-                    proc.wait(timeout=3600)
+    # ---- 运行中：显示状态与日志（切换菜单后回来仍续显）----
+    if _st["running"]:
+        st.divider()
+        st.subheader("🎤 识别进度（后台运行中，可切换菜单，返回后自动续显）")
+        st.info(_st["status"])
+        if _st["logs"]:
+            with st.expander("📋 最近日志"):
+                st.code("\n".join(_st["logs"][-30:]))
+        time.sleep(1)
+        st.rerun()
 
-                if proc.returncode == 0 and os.path.exists(result_json):
-                    with open(result_json, "r", encoding="utf-8") as f:
-                        data = json.load(f)
+    # ---- 完成：展示结果 ----
+    if _st["done"] and _st["ok"] and _st["data"]:
+        data = _st["data"]
+        st.divider()
+        st.success(f"识别完成！引擎: {data['engine']}，总耗时: {data.get('total_time_s', 0)}s")
+        st.subheader("📋 识别结果")
+        st.text_area("完整文本", value=data["text"], height=200)
 
-                    st.success(f"识别完成！引擎: {data['engine']}，总耗时: {data.get('total_time_s', 0)}s")
-                    st.subheader("📋 识别结果")
-                    st.text_area("完整文本", value=data["text"], height=200)
+        if data.get("segments"):
+            st.divider()
+            st.subheader("⏱️ 分段信息")
+            has_speaker = any("speaker" in seg and seg["speaker"] is not None for seg in data["segments"])
+            if has_speaker:
+                current_speaker = None
+                for seg in data["segments"]:
+                    spk = seg.get("speaker")
+                    seg_text = seg.get("text", "")
+                    if seg_text.strip():
+                        if spk is not None and spk != current_speaker:
+                            current_speaker = spk
+                            st.markdown(f"**说话人 {spk}**")
+                        st.write(f"{seg.get('start_ms', 0)/1000:.1f}s-{seg.get('end_ms', 0)/1000:.1f}s: {seg_text}")
+            else:
+                for seg in data["segments"]:
+                    seg_text = seg.get("text", "")
+                    if seg_text.strip():
+                        st.write(f"{seg.get('start_ms', 0)/1000:.1f}s-{seg.get('end_ms', 0)/1000:.1f}s: {seg_text}")
 
-                    if data.get("segments"):
-                        st.divider()
-                        st.subheader("⏱️ 分段信息")
-                        # 判断是否有说话人（注意 spk 可能是 0，不能用 truthy 判断）
-                        has_speaker = any("speaker" in seg and seg["speaker"] is not None for seg in data["segments"])
-                        if has_speaker:
-                            current_speaker = None
-                            for seg in data["segments"]:
-                                spk = seg.get("speaker")
-                                seg_text = seg.get("text", "")
-                                if seg_text.strip():
-                                    if spk is not None and spk != current_speaker:
-                                        current_speaker = spk
-                                        st.markdown(f"**说话人 {spk}**")
-                                    st.write(f"{seg.get('start_ms', 0)/1000:.1f}s-{seg.get('end_ms', 0)/1000:.1f}s: {seg_text}")
-                        else:
-                            for seg in data["segments"]:
-                                seg_text = seg.get("text", "")
-                                if seg_text.strip():
-                                    st.write(f"{seg.get('start_ms', 0)/1000:.1f}s-{seg.get('end_ms', 0)/1000:.1f}s: {seg_text}")
+        st.divider()
+        st.info(f"📁 已保存 JSON：`{_st['json_path']}`")
+        st.info(f"📁 已保存文本：`{_st['md_path']}`")
+        with open(_st["md_path"], "rb") as f:
+            st.download_button("📥 另存为 Markdown...", f, file_name=os.path.basename(_st["md_path"]), mime="text/markdown")
+        with open(_st["json_path"], "rb") as f:
+            st.download_button("📥 另存为 JSON...", f, file_name=os.path.basename(_st["json_path"]), mime="application/json")
 
-                    # 保存 Markdown 结果
-                    md_path = os.path.join(OUTPUT_SPEECH_RECOG, f"asr_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
-                    md_content = f"# 语音识别结果\n\n- 引擎: {data['engine']}\n- 音频时长: {data.get('audio_duration_s', 0)}s\n- 总耗时: {data.get('total_time_s', 0)}s\n\n## 完整文本\n\n{data['text']}\n\n"
-                    if data.get("segments"):
-                        md_content += "## 分段信息\n\n"
-                        for seg in data["segments"]:
-                            spk_val = seg.get("speaker")
-                            spk = f" [说话人 {spk_val}]" if spk_val is not None else ""
-                            md_content += f"- {seg.get('start_ms', 0)/1000:.1f}s-{seg.get('end_ms', 0)/1000:.1f}s{spk}: {seg.get('text', '')}\n"
-                    with open(md_path, "w", encoding="utf-8") as f:
-                        f.write(md_content)
-
-                    st.divider()
-                    st.info(f"📁 已保存 JSON：`{result_json}`")
-                    st.info(f"📁 已保存文本：`{md_path}`")
-                    with open(md_path, "rb") as f:
-                        st.download_button("📥 另存为 Markdown...", f, file_name=os.path.basename(md_path), mime="text/markdown")
-                    with open(result_json, "rb") as f:
-                        st.download_button("📥 另存为 JSON...", f, file_name=os.path.basename(result_json), mime="application/json")
-                    log_activity("语音识别", f"引擎={data['engine']} | 音频={uploaded_audio.name} | 时长={data.get('audio_duration_s', 0)}s | 耗时={data.get('total_time_s', 0)}s", duration=data.get('total_time_s', 0))
-                else:
-                    st.error(f"识别失败: {''.join(log_lines)[-500:]}")
-                    log_activity("语音识别", f"音频={uploaded_audio.name}", status="error")
-
-
+    if _st["done"] and not _st["ok"]:
+        st.error(f"识别失败: {_st['error'][-500:]}")
 # ==================== 语音合成页 ====================
 elif page == "🔊 语音合成":
     st.title("🔊 语音合成")
     st.caption("edge-tts（微软云端，快速）| Qwen3-TTS-0.6B（本地离线，多音色+指令控制+声音克隆）")
+
+    # 共享任务状态（跨 rerun 保留，切换菜单再回来不丢）
+    _st = _bt_store().setdefault("tts", {
+        "running": False, "done": False, "ok": False, "status": "",
+        "output_path": None, "audio_mime": "audio/mp3", "success_msg": "",
+        "metrics": None, "error": "",
+    })
+
+    # Qwen3-TTS 模型懒加载（st.cache_resource 跨 rerun 缓存同一模型对象，
+    # 且须在主线程调用（点击按钮时）加载，后台线程只持有引用使用）
+    @st.cache_resource(show_spinner=False)
+    def _load_qwen_cv_model():
+        import torch as _torch
+        from qwen_tts import Qwen3TTSModel
+        return Qwen3TTSModel.from_pretrained(
+            os.path.expanduser("~/Desktop/星小辰工作空间/models/tts/Qwen3-TTS-12Hz-0.6B-CustomVoice"),
+            device_map="cpu", dtype=_torch.float32,
+        )
+
+    @st.cache_resource(show_spinner=False)
+    def _load_qwen_base_model():
+        import torch as _torch
+        from qwen_tts import Qwen3TTSModel
+        return Qwen3TTSModel.from_pretrained(
+            os.path.expanduser("~/Desktop/星小辰工作空间/models/tts/Qwen3-TTS-12Hz-0.6B-Base"),
+            device_map="cpu", dtype=_torch.float32,
+        )
+
+    # 后台线程：edge-tts
+    def _edge_worker(text_val, voice_id, rate, volume, pitch):
+        try:
+            _st["status"] = "🔊 正在生成（edge-tts）..."
+            output_path, error = synthesize_speech(text_val, voice_id, rate=rate, volume=volume, pitch=pitch)
+            if output_path:
+                _st.update(ok=True, output_path=output_path, audio_mime="audio/mp3",
+                           success_msg="生成完成！（edge-tts）", status="✅ 生成完成")
+                log_activity("语音合成(edge-tts)", f"音色={voice_id} | 文本={text_val[:60]}")
+            else:
+                _st["error"] = error
+                _st["status"] = f"❌ 生成失败: {error}"
+                log_activity("语音合成(edge-tts)", f"失败: {error}", status="error")
+        except Exception as e:
+            _st["error"] = str(e)
+            _st["status"] = f"❌ 生成出错: {e}"
+        finally:
+            _st["done"] = True
+            _st["running"] = False
+
+    # 后台线程：Qwen3-TTS 预置音色
+    def _qwen_worker(text_val, speaker_id, lang_id, instruct_val, model, output_path):
+        try:
+            _st["status"] = "🔊 正在合成（Qwen3-TTS）..."
+            t0 = time.time()
+            kwargs = dict(text=text_val, language=lang_id, speaker=speaker_id)
+            if instruct_val.strip():
+                kwargs["instruct"] = instruct_val.strip()
+            wavs, sr = model.generate_custom_voice(**kwargs)
+            infer_time = time.time() - t0
+            import soundfile as _sf
+            _sf.write(output_path, wavs[0], sr)
+            audio_dur = len(wavs[0]) / sr
+            rtf = infer_time / audio_dur if audio_dur > 0 else 0
+            _st.update(ok=True, output_path=output_path, audio_mime="audio/wav",
+                       success_msg="生成完成！（Qwen3-TTS 预置音色，本地离线）", status="✅ 生成完成",
+                       metrics={"合成耗时": f"{infer_time:.1f}s", "音频时长": f"{audio_dur:.1f}s", "RTF (实时率)": f"{rtf:.2f}"})
+            log_activity("语音合成(Qwen3-TTS)", f"音色={speaker_id} | 文本={text_val[:60]} | RTF={rtf:.2f}", duration=infer_time)
+        except Exception as e:
+            _st["error"] = str(e)
+            _st["status"] = f"❌ 合成失败: {e}"
+            log_activity("语音合成(Qwen3-TTS)", f"失败: {e}", status="error")
+        finally:
+            _st["done"] = True
+            _st["running"] = False
+
+    # 后台线程：声音克隆
+    def _clone_worker(text_val, lang_id, ref_tmp, ref_text, xvec_only, model, output_path):
+        try:
+            _st["status"] = "🔊 正在克隆合成..."
+            t0 = time.time()
+            wavs, sr = model.generate_voice_clone(
+                text=text_val,
+                language=lang_id,
+                ref_audio=ref_tmp,
+                ref_text=ref_text if not xvec_only else None,
+                x_vector_only_mode=xvec_only,
+                non_streaming_mode=True,
+            )
+            infer_time = time.time() - t0
+            try:
+                os.remove(ref_tmp)
+            except OSError:
+                pass
+            import soundfile as _sf
+            _sf.write(output_path, wavs[0], sr)
+            audio_dur = len(wavs[0]) / sr
+            rtf = infer_time / audio_dur if audio_dur > 0 else 0
+            _mode_label = "X-vector" if xvec_only else "ICL"
+            _st.update(ok=True, output_path=output_path, audio_mime="audio/wav",
+                       success_msg=f"克隆生成完成！（{_mode_label} 模式，本地离线）", status="✅ 生成完成",
+                       metrics={"克隆耗时": f"{infer_time:.1f}s", "音频时长": f"{audio_dur:.1f}s", "RTF (实时率)": f"{rtf:.2f}"})
+            log_activity("语音合成(克隆)", f"模式={_mode_label} | 文本={text_val[:60]} | RTF={rtf:.2f}", duration=infer_time)
+        except Exception as e:
+            _st["error"] = str(e)
+            _st["status"] = f"❌ 克隆失败: {e}"
+        finally:
+            _st["done"] = True
+            _st["running"] = False
 
     text = st.text_area("输入文本", value="你好，我是本地AI工厂的语音合成模块。今天天气真不错，适合出门走走。", height=80)
 
@@ -3014,22 +3341,12 @@ elif page == "🔊 语音合成":
             with col_b:
                 pitch = st.slider("音调", -50, 50, 0, help="负数变低，正数变高")
 
-        if st.button("🔊 生成语音", type="primary", key="btn_edge_tts"):
-            with st.spinner("生成中..."):
-                voice_id = voice.split(" ")[0]
-                output_path, error = synthesize_speech(text, voice_id, rate=rate, volume=volume, pitch=pitch)
-                if output_path:
-                    st.success("生成完成！（edge-tts）")
-                    with open(output_path, "rb") as f:
-                        st.audio(f.read(), format="audio/mp3")
-                    tts_filename = os.path.basename(output_path)
-                    st.info(f"📁 已保存到：`{output_path}`")
-                    with open(output_path, "rb") as f:
-                        st.download_button("📥 另存为...", f, file_name=tts_filename, mime="audio/mp3")
-                    log_activity("语音合成(edge-tts)", f"音色={voice_id} | 文本={text[:60]}")
-                else:
-                    st.error(f"生成失败: {error}")
-                    log_activity("语音合成(edge-tts)", f"失败: {error}", status="error")
+        if st.button("🔊 生成语音", type="primary", key="btn_edge_tts", disabled=_st["running"]):
+            voice_id = voice.split(" ")[0]
+            _st.update(running=True, done=False, ok=False, status="🔊 正在生成（edge-tts）...",
+                       output_path="", audio_mime="audio/mp3", success_msg="", error="", metrics=None)
+            threading.Thread(target=_edge_worker, args=(text, voice_id, rate, volume, pitch), daemon=True).start()
+            st.rerun()
 
     else:
         # ── Qwen3-TTS 本地离线合成 ──
@@ -3043,7 +3360,6 @@ elif page == "🔊 语音合成":
             tts_submode = st.radio("合成模式", ["预置音色（9种音色+指令控制）", "声音克隆（上传参考音频）"], horizontal=True)
 
             if "预置音色" in tts_submode:
-                # ── 预置音色模式 ──
                 st.info("Qwen3-TTS 首次加载约 1 秒，CPU 推理约 6-15 秒（取决于文本长度）。支持 9 种预置音色、10 种语言、自然语言指令控制。")
 
                 speaker_options = [
@@ -3068,67 +3384,27 @@ elif page == "🔊 语音合成":
                     help="用自然语言描述你想要的语气、情感、语速等效果，留空则使用默认风格"
                 )
 
-                if st.button("🔊 生成语音（Qwen3-TTS）", type="primary", key="btn_qwen_tts"):
-                    with st.spinner("合成中...（CPU 推理约 6-15 秒）"):
-                        output_path = os.path.join(OUTPUT_AUDIO_TTS, f"tts_qwen3_{int(time.time())}.wav")
-                        os.makedirs(OUTPUT_AUDIO_TTS, exist_ok=True)
-                        try:
-                            import torch as _torch
-                            from qwen_tts import Qwen3TTSModel
-
-                            if "qwen_tts_cv_model" not in st.session_state:
-                                st.session_state.qwen_tts_cv_model = Qwen3TTSModel.from_pretrained(
-                                    _qwen_tts_cv_path,
-                                    device_map="cpu",
-                                    dtype=_torch.float32,
-                                )
-                            _tts_model = st.session_state.qwen_tts_cv_model
-
-                            speaker_id = speaker_sel.split(" ")[0]
-                            lang_map = {
-                                "Auto": "Auto", "Chinese": "Chinese", "English": "English",
-                                "Japanese": "Japanese", "Korean": "Korean", "German": "German",
-                                "French": "French", "Russian": "Russian", "Portuguese": "Portuguese",
-                                "Spanish": "Spanish", "Italian": "Italian",
-                            }
-                            lang_id = lang_map[lang_sel.split("（")[0]]
-
-                            t0 = time.time()
-                            kwargs = dict(text=text, language=lang_id, speaker=speaker_id)
-                            if instruct_val.strip():
-                                kwargs["instruct"] = instruct_val.strip()
-                            wavs, sr = _tts_model.generate_custom_voice(**kwargs)
-                            infer_time = time.time() - t0
-
-                            import soundfile as _sf
-                            _sf.write(output_path, wavs[0], sr)
-
-                            audio_dur = len(wavs[0]) / sr
-                            rtf = infer_time / audio_dur if audio_dur > 0 else 0
-
-                            st.success("生成完成！（Qwen3-TTS 预置音色，本地离线）")
-                            with open(output_path, "rb") as f:
-                                st.audio(f.read(), format="audio/wav")
-                            q_filename = os.path.basename(output_path)
-                            st.info(f"📁 已保存到：`{output_path}`")
-                            with open(output_path, "rb") as f:
-                                st.download_button("📥 另存为...", f, file_name=q_filename, mime="audio/wav")
-
-                            col_s1, col_s2, col_s3 = st.columns(3)
-                            with col_s1:
-                                st.metric("合成耗时", f"{infer_time:.1f}s")
-                            with col_s2:
-                                st.metric("音频时长", f"{audio_dur:.1f}s")
-                            with col_s3:
-                                st.metric("RTF (实时率)", f"{rtf:.2f}")
-
-                            log_activity("语音合成(Qwen3-TTS)", f"音色={speaker_sel.split()[0]} | 文本={text[:60]} | RTF={rtf:.2f}", duration=infer_time)
-
-                        except Exception as e:
-                            import traceback
-                            traceback.print_exc()
-                            st.error(f"Qwen3-TTS 合成失败: {e}")
-                            log_activity("语音合成(Qwen3-TTS)", f"失败: {e}", status="error")
+                if st.button("🔊 生成语音（Qwen3-TTS）", type="primary", key="btn_qwen_tts", disabled=_st["running"]):
+                    output_path = os.path.join(OUTPUT_AUDIO_TTS, f"tts_qwen3_{int(time.time())}.wav")
+                    os.makedirs(OUTPUT_AUDIO_TTS, exist_ok=True)
+                    try:
+                        _model = _load_qwen_cv_model()  # 主线程加载（首次约30s）
+                    except Exception as e:
+                        _st.update(done=True, ok=False, error=f"模型加载失败: {e}", status="❌ 模型加载失败")
+                        st.rerun()
+                    else:
+                        speaker_id = speaker_sel.split(" ")[0]
+                        lang_map = {
+                            "Auto": "Auto", "Chinese": "Chinese", "English": "English",
+                            "Japanese": "Japanese", "Korean": "Korean", "German": "German",
+                            "French": "French", "Russian": "Russian", "Portuguese": "Portuguese",
+                            "Spanish": "Spanish", "Italian": "Italian",
+                        }
+                        lang_id = lang_map[lang_sel.split("（")[0]]
+                        _st.update(running=True, done=False, ok=False, status="🔊 正在合成（Qwen3-TTS）...",
+                                   output_path="", audio_mime="audio/wav", success_msg="", error="", metrics=None)
+                        threading.Thread(target=_qwen_worker, args=(text, speaker_id, lang_id, instruct_val, _model, output_path), daemon=True).start()
+                        st.rerun()
 
             else:
                 # ── 声音克隆模式 ──
@@ -3150,87 +3426,62 @@ elif page == "🔊 语音合成":
                     clone_lang_options = ["Auto（自动检测）", "Chinese（中文）", "English（英语）", "Japanese（日语）", "Korean（韩语）", "German（德语）", "French（法语）", "Russian（俄语）", "Portuguese（葡萄牙语）", "Spanish（西班牙语）", "Italian（意大利语）"]
                     clone_lang_sel = st.selectbox("语言", clone_lang_options, index=0, key="clone_lang")
 
-                    if st.button("🔊 克隆生成语音", type="primary", key="btn_voice_clone"):
+                    if st.button("🔊 克隆生成语音", type="primary", key="btn_voice_clone", disabled=_st["running"]):
                         if ref_audio_file is None:
                             st.error("请先上传参考音频")
                         elif "ICL" in clone_mode and not ref_text_val.strip():
                             st.error("ICL 模式需要填写参考文本")
                         else:
-                            with st.spinner("克隆合成中...（CPU 推理约 8-15 秒）"):
-                                output_path = os.path.join(OUTPUT_AUDIO_TTS, f"tts_clone_{int(time.time())}.wav")
-                                os.makedirs(OUTPUT_AUDIO_TTS, exist_ok=True)
-                                try:
-                                    import torch as _torch
-                                    from qwen_tts import Qwen3TTSModel
+                            output_path = os.path.join(OUTPUT_AUDIO_TTS, f"tts_clone_{int(time.time())}.wav")
+                            os.makedirs(OUTPUT_AUDIO_TTS, exist_ok=True)
+                            try:
+                                _base_model = _load_qwen_base_model()  # 主线程加载（首次约30s）
+                            except Exception as e:
+                                _st.update(done=True, ok=False, error=f"模型加载失败: {e}", status="❌ 模型加载失败")
+                                st.rerun()
+                            else:
+                                ref_tmp = os.path.join(OUTPUT_AUDIO_TTS, f"_ref_tmp_{int(time.time())}.wav")
+                                with open(ref_tmp, "wb") as f:
+                                    f.write(ref_audio_file.getvalue())
+                                _xvec_only = "X-vector" in clone_mode
+                                lang_map = {
+                                    "Auto": "Auto", "Chinese": "Chinese", "English": "English",
+                                    "Japanese": "Japanese", "Korean": "Korean", "German": "German",
+                                    "French": "French", "Russian": "Russian", "Portuguese": "Portuguese",
+                                    "Spanish": "Spanish", "Italian": "Italian",
+                                }
+                                _lang_id = lang_map[clone_lang_sel.split("（")[0]]
+                                _st.update(running=True, done=False, ok=False, status="🔊 正在克隆声音...",
+                                           output_path="", audio_mime="audio/wav", success_msg="", error="", metrics=None)
+                                threading.Thread(target=_clone_worker, args=(text, _lang_id, ref_tmp, ref_text_val.strip(), _xvec_only, _base_model, output_path), daemon=True).start()
+                                st.rerun()
 
-                                    # 保存上传的参考音频到临时文件
-                                    ref_tmp = os.path.join(OUTPUT_AUDIO_TTS, f"_ref_tmp_{int(time.time())}.wav")
-                                    with open(ref_tmp, "wb") as f:
-                                        f.write(ref_audio_file.getvalue())
+    # ---- 运行中：显示进度（切换菜单后回来仍续显）----
+    if _st["running"]:
+        st.divider()
+        st.subheader("🔊 合成进度（后台运行中，可切换菜单，返回后自动续显）")
+        st.info(_st["status"])
+        time.sleep(1)
+        st.rerun()
 
-                                    # 懒加载 Base 模型
-                                    if "qwen_tts_base_model" not in st.session_state:
-                                        st.session_state.qwen_tts_base_model = Qwen3TTSModel.from_pretrained(
-                                            _qwen_tts_base_path,
-                                            device_map="cpu",
-                                            dtype=_torch.float32,
-                                        )
-                                    _base_model = st.session_state.qwen_tts_base_model
+    # ---- 完成：展示结果 ----
+    if _st["done"] and _st["ok"] and _st["output_path"]:
+        st.divider()
+        st.success(_st["success_msg"])
+        with open(_st["output_path"], "rb") as f:
+            st.audio(f.read(), format=_st["audio_mime"])
+        tts_filename = os.path.basename(_st["output_path"])
+        st.info(f"📁 已保存到：`{_st['output_path']}`")
+        with open(_st["output_path"], "rb") as f:
+            st.download_button("📥 另存为...", f, file_name=tts_filename, mime=_st["audio_mime"])
+        if _st.get("metrics"):
+            _cols = st.columns(3)
+            for _i, (_k, _v) in enumerate(_st["metrics"].items()):
+                with _cols[_i]:
+                    st.metric(_k, _v)
 
-                                    # 解析参数
-                                    _xvec_only = "X-vector" in clone_mode
-                                    lang_map = {
-                                        "Auto": "Auto", "Chinese": "Chinese", "English": "English",
-                                        "Japanese": "Japanese", "Korean": "Korean", "German": "German",
-                                        "French": "French", "Russian": "Russian", "Portuguese": "Portuguese",
-                                        "Spanish": "Spanish", "Italian": "Italian",
-                                    }
-                                    _lang_id = lang_map[clone_lang_sel.split("（")[0]]
-
-                                    t0 = time.time()
-                                    wavs, sr = _base_model.generate_voice_clone(
-                                        text=text,
-                                        language=_lang_id,
-                                        ref_audio=ref_tmp,
-                                        ref_text=ref_text_val.strip() if not _xvec_only else None,
-                                        x_vector_only_mode=_xvec_only,
-                                        non_streaming_mode=True,
-                                    )
-                                    infer_time = time.time() - t0
-
-                                    # 清理临时参考文件
-                                    try:
-                                        os.remove(ref_tmp)
-                                    except OSError:
-                                        pass
-
-                                    import soundfile as _sf
-                                    _sf.write(output_path, wavs[0], sr)
-
-                                    audio_dur = len(wavs[0]) / sr
-                                    rtf = infer_time / audio_dur if audio_dur > 0 else 0
-
-                                    _mode_label = "X-vector" if _xvec_only else "ICL"
-                                    st.success(f"克隆生成完成！（{_mode_label} 模式，本地离线）")
-                                    with open(output_path, "rb") as f:
-                                        st.audio(f.read(), format="audio/wav")
-                                    c_filename = os.path.basename(output_path)
-                                    st.info(f"📁 已保存到：`{output_path}`")
-                                    with open(output_path, "rb") as f:
-                                        st.download_button("📥 另存为...", f, file_name=c_filename, mime="audio/wav")
-
-                                    col_c1, col_c2, col_c3 = st.columns(3)
-                                    with col_c1:
-                                        st.metric("克隆耗时", f"{infer_time:.1f}s")
-                                    with col_c2:
-                                        st.metric("音频时长", f"{audio_dur:.1f}s")
-                                    with col_c3:
-                                        st.metric("RTF (实时率)", f"{rtf:.2f}")
-
-                                except Exception as e:
-                                    import traceback
-                                    traceback.print_exc()
-                                    st.error(f"声音克隆失败: {e}")
+    if _st["done"] and not _st["ok"]:
+        st.error(f"合成失败: {_st['error']}")
 
     # 历史音频
     st.divider()
@@ -3240,8 +3491,6 @@ elif page == "🔊 语音合成":
         audios = [f for f in os.listdir(audio_dir) if f.endswith(('.mp3', '.wav'))]
         for audio_file in sorted(audios)[-5:]:
             st.audio(os.path.join(audio_dir, audio_file))
-
-
 # ==================== 智能问答页 ====================
 elif page == "📚 智能问答":
     st.title("📚 智能问答")

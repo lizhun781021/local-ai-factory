@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '92ec66a2-f827-4d82-be7d-16eae325177f'
-  PropagateID: '92ec66a2-f827-4d82-be7d-16eae325177f'
-  ReservedCode1: '236b5d30-8d06-47da-8b69-65ba63e8c2f7'
-  ReservedCode2: '236b5d30-8d06-47da-8b69-65ba63e8c2f7'
+  ProduceID: 'a19f08d0-9c5b-4c21-bb8a-566c702e6b82'
+  PropagateID: 'a19f08d0-9c5b-4c21-bb8a-566c702e6b82'
+  ReservedCode1: '595c21c0-038e-4678-bd05-f170739b97c1'
+  ReservedCode2: '595c21c0-038e-4678-bd05-f170739b97c1'
 ---
 
 # 📋 更新日志
@@ -16,6 +16,29 @@ AIGC:
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 版本标签格式：`v{版本号}`
+
+---
+
+## [2.2.1] - 2026-09-23
+
+### 🐛 全量耗时页面修复：切换菜单不再丢失进度/结果
+
+#### 背景
+Streamlit 每次切换菜单会整页 rerun（以全新命名空间重跑脚本），此前所有耗时任务都在按钮点击块内**同步执行**、结果只存局部变量，切换菜单即中断任务并丢失结果展示。
+
+#### 修复（统一方案：后台线程 + `st.cache_resource` 共享状态）
+- **🔬 模型对比**：测试改为后台线程执行，进度（`[n/总数]`）与结果跨 rerun 保留，切页返回自动续显
+- **👁️ 图片理解**：VLM 流式分析改为后台线程，生成中的文本实时同步，完成结果/思考过程/md 报告切页不丢
+- **🎥 视频理解**：同上
+- **🎨 图片生成**：ComfyUI 同步生成改为后台线程，进度条（步数/ETA）跨页续显，完成后图片+下载按钮保留
+- **🎬 视频生成**（文生视频 + 图生视频）：5-10 分钟长任务改为后台线程，两个 tab 独立状态，进度与结果均跨页保留
+- **🎤 语音识别**：ASR 子进程改为后台线程，识别日志实时同步，完成后完整文本/分段/说话人展示与下载保留
+- **🔊 语音合成**（edge-tts / Qwen3-TTS 预置 / 声音克隆）：三处均改后台线程；Qwen3-TTS 模型缓存从 `st.session_state` 迁移到 `st.cache_resource`（后台线程无法访问 session_state，且模型须在主线程懒加载、线程持引用使用）
+
+#### 关键技术说明（已写入代码注释）
+- 后台线程**不能访问** `st.session_state`（缺脚本线程上下文），统一改用 `st.cache_resource` 缓存 dict 对象，主线程与后台线程共享引用
+- 模块级全局变量在 rerun 时会被全新命名空间重置，同样不能用于跨 rerun 状态保持
+- 受影响但无需修改的页面：智能问答（已用 session_state 缓存）、文本对话（历史本就在 session_state）、监控/统计/日志页（无耗时操作）
 
 ---
 
