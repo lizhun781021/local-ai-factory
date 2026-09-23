@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'a19f08d0-9c5b-4c21-bb8a-566c702e6b82'
-  PropagateID: 'a19f08d0-9c5b-4c21-bb8a-566c702e6b82'
-  ReservedCode1: '595c21c0-038e-4678-bd05-f170739b97c1'
-  ReservedCode2: '595c21c0-038e-4678-bd05-f170739b97c1'
+  ProduceID: '54f4eb21-7504-4ced-874f-a37a4fb13317'
+  PropagateID: '54f4eb21-7504-4ced-874f-a37a4fb13317'
+  ReservedCode1: 'f7af5812-a621-4674-a2e1-c2dc6bdfc152'
+  ReservedCode2: 'f7af5812-a621-4674-a2e1-c2dc6bdfc152'
 ---
 
 # 📋 更新日志
@@ -16,6 +16,20 @@ AIGC:
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 版本标签格式：`v{版本号}`
+
+---
+
+## [2.2.2] - 2026-09-23
+
+### 🚀 新增：Xing4.0 星辰语义大模型本地推理服务
+
+#### 新增
+- `xing-server.py`：Xing4.0（transformers + PyTorch MPS，bf16 约 60GB）OpenAI 兼容推理服务，端口 8089，支持 `/v1/models`、`/v1/chat/completions`、`/health`
+- `xing-server.sh`：服务管理脚本（start/stop/restart/status/test），带就绪等待与健康检查
+- `router_config.yaml` 新增 `xing4.0-local` 模型路由（本地端口 8089，上下文 262144，质量最高）
+
+#### 其他
+- `.gitignore` 补充 `*.bak`、`screenshots/` 忽略规则
 
 ---
 

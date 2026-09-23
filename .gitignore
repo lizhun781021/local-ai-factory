@@ -14,3 +14,8 @@ eval_dataset.yaml
 ragflow-docker/.env
 ragflow-docker/ragflow-logs/
 *.bak.*
+
+# 备份文件
+*.bak
+# 测试截图
+screenshots/

@@ -244,6 +244,29 @@ models:
     idle_timeout: 0
     startup_cmd: launchctl kickstart gui/$(id -u)/com.local-ai-factory.llm
     shutdown_cmd: ''
+  xing4.0-local:
+    api_type: openai
+    base_url: http://localhost:8089/v1
+    model_name: xing4.0
+    api_key: EMPTY
+    priority: 2
+    max_tokens: 8192
+    context_window: 262144
+    tags:
+    - chinese
+    - general
+    - reasoning
+    - telecom
+    - self-developed
+    speed: slow
+    quality: highest
+    cost: local
+    description: 本地Xing4.0-星辰语义大模型(transformers+MPS,bf16约60GB)，中电信AI自研，端口8089
+    enabled: true
+    auto_start: false
+    idle_timeout: 1800
+    startup_cmd: ''
+    shutdown_cmd: pkill -f 'xing-server.py'
   qwen3.6-27b-remote:
     api_type: openai
     base_url: http://106.0.4.142:51211/v1
