@@ -37,7 +37,7 @@ SKIP_DIRS = {".temp", ".Trash", "node_modules", "__pycache__", ".git", "fts_inde
 # 跳过的文件名模式（Office/WPS 临时文件）
 SKIP_PREFIXES = (".~", "~$", ".")
 
-LOG_FILE = os.path.expanduser("~/Desktop/星小辰工作空间/local-ai-factory/rag_sync.log")
+LOG_FILE = os.path.expanduser("~/Desktop/星小辰工作空间/local-ai-factory/output/logs/rag_sync.log")
 
 
 def log(msg, verbose=False):

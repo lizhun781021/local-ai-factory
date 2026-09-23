@@ -16,6 +16,7 @@
 """
 
 import json
+import os
 import time
 import threading
 import logging
@@ -25,6 +26,15 @@ from typing import Optional
 from dataclasses import dataclass, field
 import yaml
 import httpx
+
+
+def _expand_key(key):
+    """支持 ${ENV_VAR} 占位符：从环境变量展开密钥（防止密钥入库）"""
+    if not key:
+        return key
+    if isinstance(key, str) and key.startswith("${") and key.endswith("}"):
+        return os.environ.get(key[2:-1], "")
+    return key
 
 # ==================== 日志配置 ====================
 logging.basicConfig(
@@ -127,7 +137,7 @@ class RouterEngine:
                 api_type=m['api_type'],
                 base_url=m['base_url'],
                 model_name=m['model_name'],
-                api_key=m.get('api_key', ''),
+                api_key=_expand_key(m.get('api_key', '')),
                 priority=m.get('priority', 99),
                 max_tokens=m.get('max_tokens', 4096),
                 context_window=m.get('context_window', 8192),
@@ -200,7 +210,7 @@ class RouterEngine:
                 api_type=config.get('api_type', 'openai'),
                 base_url=config['base_url'],
                 model_name=config.get('model_name', config.get('base_url', '').split('//')[-1].split('/')[0]),
-                api_key=config.get('api_key', ''),
+                api_key=_expand_key(config.get('api_key', '')),
                 priority=config.get('priority', 99),
                 max_tokens=config.get('max_tokens', 4096),
                 context_window=config.get('context_window', 8192),
@@ -255,7 +265,7 @@ class RouterEngine:
             'api_type': config.get('api_type', 'openai'),
             'base_url': config['base_url'],
             'model_name': config.get('model_name', ''),
-            'api_key': config.get('api_key', ''),
+            'api_key': _expand_key(config.get('api_key', '')),
             'priority': config.get('priority', 99),
             'max_tokens': config.get('max_tokens', 4096),
             'context_window': config.get('context_window', 8192),

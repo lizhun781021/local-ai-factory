@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '54f4eb21-7504-4ced-874f-a37a4fb13317'
-  PropagateID: '54f4eb21-7504-4ced-874f-a37a4fb13317'
-  ReservedCode1: 'f7af5812-a621-4674-a2e1-c2dc6bdfc152'
-  ReservedCode2: 'f7af5812-a621-4674-a2e1-c2dc6bdfc152'
+  ProduceID: '8aec5dc0-6807-43b1-9177-26e7edb539f4'
+  PropagateID: '8aec5dc0-6807-43b1-9177-26e7edb539f4'
+  ReservedCode1: 'dc1b4672-b287-419f-8d8a-47792f06c0b4'
+  ReservedCode2: 'dc1b4672-b287-419f-8d8a-47792f06c0b4'
 ---
 
 # 📋 更新日志
@@ -16,6 +16,30 @@ AIGC:
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 版本标签格式：`v{版本号}`
+
+---
+
+## [2.3.0] - 2026-09-23
+
+### 🚀 全面优化：数据持久化 / 安全 / 架构 / 运维
+
+#### 数据与安全
+- **Token 统计持久化**：`token_stats` 从内存迁移到 `output/stats/token_stats.json`，每次更新落盘、启动自动恢复，重启不再清零（汇报数据不丢）
+- **密钥迁移 .env**：登录密码 `AI_FACTORY_PASSWORD`、`RAGFLOW_API_KEY`、远端模型 `QWEN_REMOTE_API_KEY` 全部移入 `.env`（gitignore 保护）；webui/router 支持 `${ENV_VAR}` 占位展开，代码不再硬编码密钥；登录页在未配置密码时给出明确提示
+
+#### 架构与整洁
+- **webui.py 拆模块**：4585 行 → 3980 行，模型 API 服务层抽离为 `factory_api.py`（LLM 对话/ComfyUI 图视频生成/图生视频/语音识别合成），主程序 `from factory_api import *`，页面代码更聚焦
+- **根目录清理**：日志/统计/临时文件归位至 `output/logs/`、`output/tmp/`（rag_sync.log、router_stats.json、旧 mp4/音频文本），脚本路径同步更新
+
+#### 运维编排
+- **factory.sh**：统一服务编排（webui/llm/vision/comfy/router/eval/proxy/watchdog/tunnel/xing），支持 `start|stop|restart|status [all|服务名]`
+- **healthcheck.sh**：一键健康巡检（端口监听 + HTTP 响应毫秒表），可接入定时任务
+- **模型路由可视化**：系统监控页新增"🤖 模型路由"卡片，展示全部启用模型的本地/远程、速度、优先级、可用状态
+- **公网 nginx 限流**：8500 入口加 `limit_req`（10r/s，burst 20），防扫描滥用；顺带修复云侧僵死隧道（8501 端口转发占用导致公网中断）
+- **一键导出**：Token 统计页新增打包导出（统计/日志/报告 zip 下载）
+
+#### 测试
+- 新增 `tests/smoke_test.py`：Playwright 全页面冒烟测试（13 页逐页检查无 Traceback/异常），本版本全部通过 ✅
 
 ---
 

@@ -1,7 +1,7 @@
 server:
   host: 0.0.0.0
   port: 8606
-  stats_file: router_stats.json
+  stats_file: output/logs/router_stats.json
   health_check_interval: 30
   request_timeout: 200
 lifecycle:
@@ -271,7 +271,7 @@ models:
     api_type: openai
     base_url: http://106.0.4.142:51211/v1
     model_name: qwen3.6-27b
-    api_key: sk-c8ebae3396d444f55dab24b383bd40048455be2ee84bb3f751504e41026437ee
+    api_key: ${QWEN_REMOTE_API_KEY}
     priority: 1
     max_tokens: 8192
     context_window: 32768
