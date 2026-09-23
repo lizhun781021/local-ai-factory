@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'f15d8e5d-521f-423f-849d-edd83b629f76'
-  PropagateID: 'f15d8e5d-521f-423f-849d-edd83b629f76'
-  ReservedCode1: '07b91765-855b-4c90-9002-233aaa0fe982'
-  ReservedCode2: '07b91765-855b-4c90-9002-233aaa0fe982'
+  ProduceID: 'eaf9a0d8-5197-4011-9990-074dcf539d3e'
+  PropagateID: 'eaf9a0d8-5197-4011-9990-074dcf539d3e'
+  ReservedCode1: '51391633-98a4-4470-956c-9af1ac9f44d6'
+  ReservedCode2: '51391633-98a4-4470-956c-9af1ac9f44d6'
 ---
 
 # 📋 更新日志
@@ -16,6 +16,19 @@ AIGC:
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 版本标签格式：`v{版本号}`
+
+---
+
+## [2.3.3] - 2026-09-23
+
+### 🧹 模型路由配置治理（清理已删除模型残留引用）
+
+- `router_config.yaml`：删除 8 个已无模型文件的条目（qwen2.5-72b-local / qwen2.5-vl-32b-local / telechat3-36b-thinking / gemma4-26b-moe / gemma4-31b-dense / gemma4-12b-mlx / qwen3.8-27b-local / cosyvoice-tts），修正 3 处错误端口（8189→8188），当前 10 个有效模型
+- `routing_rules` 同步修正：所有 `qwen3.8-27b-local` 引用改为 `qwen3.8-27b-resident`（本地常驻 8082），移除 `telechat3-36b-thinking`、`qwen2.5-vl-32b-local` 等失效引用，vision 规则改指多模态 Qwen3.8
+- `router.py`：兜底降级链移除已删除的 `qwen2.5-72b-local`
+- `smart_strategy.json`：清理失效策略（曾将默认/代码/推理任务错误指向已删除模型），回退静态规则；备份至 `.temp/`
+- `router-server.py`：新增极简 `.env` 加载器，修复远程 `qwen3.6-27b-remote`（武林 vLLM）401 鉴权失败（密钥未注入进程环境）
+- 验证：`/admin/reload` 10 模型 7 规则；短消息→gemma4 最快、code→本地常驻 Qwen3.8、默认长文本→Qwen3.8 均路由正确；远程模型健康检查通过
 
 ---
 

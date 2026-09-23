@@ -25,6 +25,7 @@
 """
 
 import json
+import os
 import time
 import asyncio
 from typing import Optional
@@ -40,6 +41,27 @@ from router import RouterEngine, logger
 from evaluator import EvalEngine
 from smart_router import SmartRouter
 from lifecycle import LifecycleManager
+
+# ==================== .env 配置加载（密钥不入库） ====================
+def _load_dotenv(path=None):
+    """极简 .env 加载器（无第三方依赖）：KEY=VALUE 逐行，已存在的环境变量优先"""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    try:
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
+
+_load_dotenv()
 
 # ==================== 初始化 ====================
 engine = RouterEngine()

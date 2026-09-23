@@ -391,7 +391,7 @@ class RouterEngine:
                                                   rule.get('fallback', []))
 
         # 兜底（理论上 default 规则会命中）
-        return "fallback", "qwen3.6-27b-remote", ["qwen2.5-72b-local", "gemma4-12b-ollama"]
+        return "fallback", "qwen3.6-27b-remote", ["qwen3.6-35b-moe", "gemma4-12b-ollama"]
 
     def _apply_smart_routing(self, rule_name: str, default_target: str,
                              default_fallback: list) -> tuple[str, str, list]:
