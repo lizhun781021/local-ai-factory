@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '7535fda8-f981-4af4-abf9-c190b0928e2c'
-  PropagateID: '7535fda8-f981-4af4-abf9-c190b0928e2c'
-  ReservedCode1: '237e80c9-697b-4f94-a025-6b8f97e05ca6'
-  ReservedCode2: '237e80c9-697b-4f94-a025-6b8f97e05ca6'
+  ProduceID: '6e9f1c0f-4b40-4b59-8ba7-3fcc70e2f9cd'
+  PropagateID: '6e9f1c0f-4b40-4b59-8ba7-3fcc70e2f9cd'
+  ReservedCode1: '7f50261f-a64b-46ea-b311-8fab71c8d1ee'
+  ReservedCode2: '7f50261f-a64b-46ea-b311-8fab71c8d1ee'
 ---
 
 # 📋 更新日志
@@ -16,6 +16,16 @@ AIGC:
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 版本标签格式：`v{版本号}`
+
+---
+
+## [2.3.5] - 2026-09-23
+
+### ✨ 文本对话页新增 Xing4.0 模型支持
+
+- 文本对话模型列表新增 `Xing4.0 (星辰语义大模型)`（此前仅 Qwen3.8/Qwen3.6/gemma）
+- `factory_api.py`：`call_llm_api` 新增 xing4.0 分支（8089 端口 transformers+MPS 服务），与模型对比页保持一致
+- 修复 macOS 系统代理劫持：系统 HTTP 代理 `127.0.0.1:7892` 会拦截发往 localhost 的请求导致超时，现强制 `NO_PROXY=localhost,127.0.0.1,...` 本地直连
 
 ---
 

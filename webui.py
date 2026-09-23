@@ -1398,6 +1398,7 @@ elif page == "🧠 文本对话":
     llm_models = {
         "Qwen3.8-27B-4bit (轻量主力)": "/Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/Qwen3.8-27B-4bit",
         "Qwen3.6-35B-A3B-bf16 (快速)": "/Users/lizhun/Desktop/星小辰工作空间/models/mlx-lm/Qwen3.6-35B-A3B-bf16",
+        "Xing4.0 (星辰语义大模型)": "xing4.0",
         "gemma4:12b (Ollama，仅中文)": "ollama:gemma4:12b",
     }
     selected_llm = st.selectbox("选择模型", list(llm_models.keys()))

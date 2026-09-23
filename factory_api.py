@@ -7,6 +7,10 @@
 import os, json, time, random, threading, subprocess
 import requests
 
+# ---- 本地服务调用禁用系统代理（macOS 系统代理 127.0.0.1:7892 会劫持 localhost 请求）----
+os.environ["NO_PROXY"] = "localhost,127.0.0.1,127.*,10.*,192.168.*,*.local"
+os.environ["no_proxy"] = "localhost,127.0.0.1,127.*,10.*,192.168.*,*.local"
+
 # ---- 常量（与 webui.py 保持一致）----
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(PROJECT_DIR, "output")
@@ -51,6 +55,30 @@ def call_llm_api(messages, max_tokens=1024, model_path=None):
                 return f"Ollama 错误: {resp.status_code}", {}
         except Exception as e:
             return f"Ollama 连接失败: {str(e)}", {}
+    elif model_path == "xing4.0":
+        # 本地 Xing4.0（8089，transformers + MPS，OpenAI 兼容）
+        try:
+            effective_max_tokens = max(max_tokens, 1024)
+            payload = {
+                "messages": messages,
+                "max_tokens": effective_max_tokens,
+                "model": "xing4.0",
+            }
+            resp = requests.post(
+                "http://localhost:8089/v1/chat/completions",
+                json=payload,
+                timeout=300
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                msg = data["choices"][0]["message"]
+                content = msg.get("content") or msg.get("reasoning") or "(模型未返回内容)"
+                usage = data.get("usage", {})
+                return content, usage
+            else:
+                return f"API 错误: {resp.status_code} - {resp.text[:200]}", {}
+        except Exception as e:
+            return f"API 连接失败（Xing4.0 未启动）: {str(e)}", {}
     else:
         # 统一走 8082 mlx_lm server API，通过 model 参数指定模型
         try:
