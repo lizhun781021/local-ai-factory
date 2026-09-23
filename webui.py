@@ -3902,23 +3902,25 @@ elif page == "📖 AI工厂说明":
 
     > 作者：李准的星小辰 · 版本：v{APP_VERSION}
 
+    > 💡 **后台任务特性**：所有耗时任务（模型对比/图视频生成/语音识别等）均后台执行，**切换菜单不中断、不丢进度**，返回自动续显。
+
     ---
 
     ## 🧩 功能模块
 
     | 模块 | 功能 | 技术栈 |
     |------|------|--------|
-    | 📊 系统监控 | CPU/内存/磁盘/GPU 实时监控，服务状态，模型进程 | Streamlit + psutil + Plotly |
-    | 🧠 文本对话 | 多模型对话，支持上下文，Token 统计 | mlx-lm / Ollama（Qwen3.8-27B 主力） |
-    | 🔬 模型对比 | 同一 prompt 并行调用多个模型，横向对比 | MLX 多端口并发 |
-    | 👁️ 图片理解 | 图片上传 + AI 描述/OCR/问答 | Qwen3.8-27B-4bit（多模态） |
-    | 🎬 视频理解 | 视频抽帧 + AI 分析 | Qwen3.8-27B-4bit |
-    | 🎨 图片生成 | 文生图，1024×1024 | ComfyUI + SDXL / SANA |
-    | 🎬 视频生成 | 文生视频，5 秒 24fps | ComfyUI + MiniMax H3 4-bit |
-    | 🎤 语音识别 | 音频转文字，多人说话分离 | SenseVoiceSmall / Seaco-Paraformer + cam++ |
-    | 🔊 语音合成 | 文字转语音，音色克隆 | Qwen3-TTS-0.6B + edge-tts |
+    | 📊 系统监控 | CPU/内存/磁盘/GPU 实时监控，服务状态，**模型路由卡片**，模型进程 | Streamlit + psutil + Plotly |
+    | 🧠 文本对话 | 多模型对话，支持上下文，Token 统计（持久化） | mlx-lm / Ollama（Qwen3.8-27B 主力） |
+    | 🔬 模型对比 | 7 项测试 × 多模型全量对比（后台线程，切页不丢） | MLX 多模型并行 |
+    | 👁️ 图片理解 | 图片上传 + AI 描述/OCR/问答（后台流式） | Qwen3.8-27B-4bit（多模态） |
+    | 🎥 视频理解 | 视频上传 + AI 分析（后台流式） | Qwen3.8-27B-4bit |
+    | 🎨 图片生成 | 文生图，512~1280（后台生成） | ComfyUI + SDXL / SANA / Qwen-Image |
+    | 🎬 视频生成 | 文生/图生视频，5-10 秒含同步音频（后台生成） | ComfyUI + MiniMax H3 4-bit |
+    | 🎤 语音识别 | 音频转文字，说话人分离，三引擎（后台识别） | SenseVoice / Seaco-Paraformer + cam++ |
+    | 🔊 语音合成 | 文字转语音，9 音色 + 声音克隆（后台合成） | Qwen3-TTS-0.6B + edge-tts |
     | 📚 智能问答 | 知识库问答 + 全文搜索 | RAGFlow (9380) + FTS5 本地索引 |
-    | 📈 Token 统计 | 各模型使用量/费用统计 | 内置 Token 计数器 |
+    | 📈 Token 统计 | 使用量统计（**持久化，重启不丢**）+ 一键导出 | 内置计数器 + JSON |
     | 📋 日志查看 | AI 工厂操作日志 + 模型服务日志 | /tmp/ai-factory-activity.log |
 
     ---
@@ -3930,29 +3932,32 @@ elif page == "📖 AI工厂说明":
     |------|------|------|------|
     | Qwen3.8-27B-4bit | 15 GB | ~31.5 tps | 日常主力（常驻 8082），多模态兼视觉理解 |
     | Qwen3.6-35B-A3B-bf16 | 65 GB | ~30.8 tps | MoE 通用对话/推理，激活 3B |
+    | **Xing4.0（星辰语义）** | ~60 GB | 按需 | 中电信自研大模型（8089，质量最高档，开启时启动） |
     | gemma4:12b | 7.6 GB | ~56.1 tps | 最快响应，短消息/翻译（Ollama） |
 
     ### 图像/视频生成
     | 模型 | 用途 |
     |------|------|
-    | SDXL Base 1.0 | 文生图，1024×1024，20 步 |
-    | SANA 1.5 1.6B | 文生图，1024×1024，FP32 |
-    | MiniMax H3 4-bit | 文生视频，864×480，5 秒 24fps |
+    | SDXL Base 1.0 | 文生图，1024×1024，25 步 |
+    | SANA 1.5 1.6B | 文生图，1024×1024，28 步，轻量快速 |
+    | Qwen-Image | 文生图，中文理解最强 |
+    | MiniMax H3 4-bit | 文生/图生视频，5-10 秒 864×480（含同步音频） |
 
     ### 语音
     | 模型 | 类型 | 用途 |
     |------|------|------|
-    | Qwen3-TTS-0.6B | TTS | 9 种预置音色 + 声音克隆 |
-    | SenseVoiceSmall | ASR | 极速语音识别（0.78s CPU） |
-    | Seaco-Paraformer | ASR | 长音频识别 + 说话人分离 |
+    | Qwen3-TTS-0.6B | TTS | 9 种预置音色 + 声音克隆（ICL / X-vector） |
+    | SenseVoiceSmall | ASR | 极速语音识别（≤3min，CPU） |
+    | Seaco-Paraformer | ASR | 长音频识别 + 说话人分离 + 标点 |
+    | 星辰慧记 | ASR | 云端长音频（>10min），带说话人 |
     | edge-tts | TTS | 云端备选 |
 
     ### 知识库与嵌入
     | 模型 | 用途 |
     |------|------|
-    | RAGFlow v0.27.0 | 知识库问答（459 文档，bge-large-zh 向量化） |
+    | RAGFlow | 知识库问答（bge-large-zh 向量化，每日 9:30 自动同步） |
     | bge-large-zh | 向量嵌入，1024 维，via Ollama |
-    | FTS5 本地索引 | 全文搜索，454 文件，53MB SQLite |
+    | FTS5 本地索引 | 全文搜索，本地 SQLite |
 
     ---
 
@@ -3967,7 +3972,10 @@ elif page == "📖 AI工厂说明":
     | 推理任务 | Qwen3.6-35B-MoE | → Qwen3.8 → 远程 |
     | 短消息 (≤200 token) | gemma4:12b | → Qwen3.8 |
     | 长文本 (≥4000 token) | Qwen3.8-27B | → Qwen3.6-35B |
+    | 高难度任务 | **Xing4.0（质量最高）** | → Qwen3.6-35B |
     | 默认兜底 | Qwen3.8-27B | → 远程 → Qwen3.6-35B |
+
+    > 路由配置见 `router_config.yaml`，模型可用状态可在系统监控页"🤖 模型路由"卡片查看。
 
     ---
 
@@ -3975,12 +3983,18 @@ elif page == "📖 AI工厂说明":
 
     | 服务 | 端口 | 说明 |
     |------|------|------|
-    | AI 工厂 WebUI | 8501 | 本页面，Streamlit |
+    | AI 工厂 WebUI | 8501 | 本页面，Streamlit（launchd 托管） |
     | LLM 常驻服务 | 8082 | Qwen3.8-27B-4bit（launchd 托管） |
+    | 视觉识别 | 8081 | 视觉模型服务 |
     | OpenAI 兼容代理 | 8088 | 多模型统一入口 |
     | ComfyUI | 8188 | 图片/视频生成 |
+    | Xing4.0 本地服务 | 8089 | 星辰语义大模型（按需启动） |
+    | 智能路由 | 8606 | 意图识别 + 模型选择 |
     | RAGFlow | 9380 / 8086 | 知识库（API / 代理） |
     | Ollama | 11434 | gemma4:12b + bge-large-zh |
+    | 公网入口 | 8500（云服务器） | nginx 反代 + 限流，经 SSH 隧道到本地 8501 |
+
+    > 一键管理：`./factory.sh [start|stop|restart|status] [all|服务名]`；健康巡检：`./healthcheck.sh`
 
     ---
 
@@ -3989,7 +4003,9 @@ elif page == "📖 AI工厂说明":
     - 所有模型推理在本地完成，**数据不上传**
     - 知识库文档（RAGFlow + FTS5）本地存储，每日 9:30 自动增量同步
     - 操作日志记录在 `/tmp/ai-factory-activity.log`
-    - 远程 LLM (vLLM 106.0.4.142) 仅作为降级备选
+    - 登录密码、API Key 等敏感配置存放在 `.env`（**不入 git**），代码不硬编码
+    - 公网入口 nginx 限流（10r/s + 突发 20），防扫描滥用
+    - 远程 LLM (vLLM) 仅作为降级备选
 
     ---
 
@@ -3998,12 +4014,17 @@ elif page == "📖 AI工厂说明":
     ```
     local-ai-factory/
     ├── webui.py                  # 主程序（Streamlit WebUI）
-    ├── rag_sync.py               # RAGFlow 知识库同步脚本
-    ├── ragflow-docker/           # RAGFlow Docker 部署
-    ├── router_config.yaml        # 智能路由配置
-    ├── start_all.sh / stop_all.sh  # 服务启停脚本
-    ├── output/                   # 生成内容（图片/视频/音频/报告）
-    └── README.md / CHANGELOG.md  # 项目文档
+    ├── factory_api.py           # 模型 API 服务层（LLM/图/视频/语音）
+    ├── rag_sync.py              # RAGFlow 知识库同步脚本
+    ├── ragflow-docker/          # RAGFlow Docker 部署
+    ├── router_config.yaml       # 智能路由配置
+    ├── factory.sh               # 统一服务编排
+    ├── healthcheck.sh           # 健康巡检脚本
+    ├── xing-server.py/sh        # Xing4.0 本地推理服务
+    ├── tests/smoke_test.py      # 页面冒烟测试
+    ├── .env                     # 敏感配置（勿提交）
+    ├── output/                  # 生成内容（图片/视频/音频/报告/日志）
+    └── README.md / CHANGELOG.md # 项目文档
     ```
     """)
     st.markdown(intro_md.replace("{APP_VERSION}", APP_VERSION))
