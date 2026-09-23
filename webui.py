@@ -1337,8 +1337,11 @@ if page == "📊 系统监控":
                                 _online = True
                         except Exception:
                             _online = False
-                        _tag = "本地" if _m.get("cost") == "local" else ("远程" if _m.get("cost") == "remote" else "-")
-                        st.markdown(f"**{_m.get('model_name', _mname)}**")
+                        _tag = "本地" if _m.get("cost") == "local" else ("远程" if _m.get("cost") in ("remote", "free") else "-")
+                        _disp = _m.get('model_name', _mname)
+                        if "/" in _disp:  # 本地模型路径过长，只显示短名
+                            _disp = _disp.rstrip("/").split("/")[-1]
+                        st.markdown(f"**{_disp}**")
                         st.caption(f"{_tag} · {_m.get('speed', '-')} · 优先级{_m.get('priority', 99)}")
                         if _online:
                             st.markdown("<span style='color:#16a34a;font-size:0.8rem'>● 可用</span>", unsafe_allow_html=True)

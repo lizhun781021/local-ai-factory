@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'eaf9a0d8-5197-4011-9990-074dcf539d3e'
-  PropagateID: 'eaf9a0d8-5197-4011-9990-074dcf539d3e'
-  ReservedCode1: '51391633-98a4-4470-956c-9af1ac9f44d6'
-  ReservedCode2: '51391633-98a4-4470-956c-9af1ac9f44d6'
+  ProduceID: '7535fda8-f981-4af4-abf9-c190b0928e2c'
+  PropagateID: '7535fda8-f981-4af4-abf9-c190b0928e2c'
+  ReservedCode1: '237e80c9-697b-4f94-a025-6b8f97e05ca6'
+  ReservedCode2: '237e80c9-697b-4f94-a025-6b8f97e05ca6'
 ---
 
 # 📋 更新日志
@@ -16,6 +16,15 @@ AIGC:
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 版本标签格式：`v{版本号}`
+
+---
+
+## [2.3.4] - 2026-09-23
+
+### 🎨 系统监控页模型路由卡片名称优化
+
+- 本地模型路径过长（如 `.../models/mlx-lm/Qwen3.8-27B-4bit`），卡片显示只取短名（`Qwen3.8-27B-4bit`）
+- 远程模型 cost=free 时正确显示"远程"标签（此前显示为"-"）
 
 ---
 
