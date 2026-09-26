@@ -3,15 +3,15 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '55807414-5df7-47b3-a428-7981ba74ea06'
-  PropagateID: '55807414-5df7-47b3-a428-7981ba74ea06'
-  ReservedCode1: '065b4b18-051d-47a6-88e4-b3a2baf0c01b'
-  ReservedCode2: '065b4b18-051d-47a6-88e4-b3a2baf0c01b'
+  ProduceID: '6e55af57-4493-4161-8dad-f12b6e8d2b98'
+  PropagateID: '6e55af57-4493-4161-8dad-f12b6e8d2b98'
+  ReservedCode1: '698a88d5-6434-4a72-a0a5-0029c7cf535f'
+  ReservedCode2: '698a88d5-6434-4a72-a0a5-0029c7cf535f'
 ---
 
 # 🏭 本地 AI 工厂
 
-> **v2.1.0** · 作者：李准的星小辰 · 2026-08-24
+> **v2.4.0** · 作者：李准的星小辰 · 2026-09-26
 
 基于 MacBook Pro M5 Max / 137GB 搭建的**全本地多模态 AI 环境**。所有模型在本地运行，数据不出设备。提供 Streamlit WebUI，覆盖文本、视觉、语音、生成全链路。
 
@@ -21,6 +21,13 @@ AIGC:
 local-ai-factory/
 ├── webui.py                  # 主程序（Streamlit WebUI，13个功能页面）
 ├── rag_sync.py               # RAGFlow 知识库增量同步脚本
+├── ontology/                  # 本体引擎（智能问答规则推理）
+│   ├── ontology_tool.py       #   本体引擎：加载→OWL推理→SPARQL→规则匹配
+│   ├── ontologies/            #   三个业务本体（.ttl）
+│   │   ├── package-eligibility.ttl  # 套餐与资格判定
+│   │   ├── income-indicators.ttl    # 收入指标体系
+│   │   └── marketing-scripts.ttl    # 营销话术体系
+│   └── tests/                 #   端到端测试（16项）
 ├── router_config.yaml        # 智能路由配置
 ├── router-server.py          # OpenAI 兼容代理服务器
 ├── router.py                 # 智能路由核心逻辑
@@ -91,7 +98,7 @@ python3 -m streamlit run webui.py --server.port 8501
 | 🎬 视频生成 | 文生视频，5 秒 24fps | ComfyUI + MiniMax H3 4-bit |
 | 🎤 语音识别 | 音频转文字，多人说话分离 | SenseVoiceSmall / Seaco-Paraformer + cam++ |
 | 🔊 语音合成 | 文字转语音，9 种音色，声音克隆 | Qwen3-TTS-0.6B + edge-tts |
-| 📚 智能问答 | 知识库问答 + 全文搜索 | RAGFlow + FTS5 本地索引 |
+| 📚 智能问答 | 知识库问答 + 全文搜索 + 本体推理 | RAGFlow + FTS5 + OWL本体引擎 |
 | 📈 Token 统计 | 各模型使用量/费用统计 | 内置 Token 计数器 |
 | 📋 日志查看 | 操作日志 + 模型服务日志 | /tmp/ai-factory-activity.log |
 | 📖 AI工厂说明 | 项目文档 | Markdown 内嵌 |
@@ -164,6 +171,8 @@ python3 -m streamlit run webui.py --server.port 8501
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| v2.4.0 | 2026-09-26 | 智能问答新增本体推理（套餐资格/收入指标/营销话术三大本体，Palantir Ontology 架构本地版） |
+| v2.3.5 | 2026-09-23 | 文本对话新增 Xing4.0 模型，修复 macOS 系统代理劫持 |
 | v2.1.0 | 2026-08-24 | WebUI 增强（说明页+操作日志）、RAGFlow 同步、长图、FTS5 优化 |
 | v2.0.0 | 2026-08-22 | 基准测试全面更新，SDXL/SANA/MiniMax H3/SenseVoice 等新模型 |
 | v1.0.0 | 2026-06-01 | 首个正式版本 |

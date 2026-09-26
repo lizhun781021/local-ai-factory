@@ -67,7 +67,7 @@ def call_llm_api(messages, max_tokens=1024, model_path=None):
             resp = requests.post(
                 "http://localhost:8089/v1/chat/completions",
                 json=payload,
-                timeout=300
+                timeout=1800  # Xing4.0 生成慢（约1.2 tok/s），1024 tokens 约需15分钟
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -78,7 +78,7 @@ def call_llm_api(messages, max_tokens=1024, model_path=None):
             else:
                 return f"API 错误: {resp.status_code} - {resp.text[:200]}", {}
         except Exception as e:
-            return f"API 连接失败（Xing4.0 未启动）: {str(e)}", {}
+            return f"API 连接失败（Xing4.0 生成较慢，请耐心等待或调低 Max Token）: {str(e)}", {}
     else:
         # 统一走 8082 mlx_lm server API，通过 model 参数指定模型
         try:

@@ -1,0 +1,123 @@
+@prefix : <http://www.example.org/income#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# ==================== 本体头 ====================
+<http://www.example.org/income> a owl:Ontology ;
+    rdfs:label "收入指标体系本体" ;
+    rdfs:comment "收入指标口径、18地市固定层级、同比/环比/累计账期铁律。TBox完整；ABox数值为示例占位，真实数据须从报表/数据库注入（禁止编造）。作者：李准的星小辰（2026-09-26）" .
+
+# ==================== 类 ====================
+:地市 a owl:Class ;
+    rdfs:label "地市" .
+
+:省份 a owl:Class ;
+    rdfs:label "省份（河南全省）" .
+
+:指标口径 a owl:Class ;
+    rdfs:label "指标口径" .
+
+:铁律 a owl:Class ;
+    rdfs:label "账期铁律" .
+
+:收入类别 a owl:Class ;
+    rdfs:label "收入类别" .
+
+# ==================== 对象/数据属性 ====================
+:cityName a owl:DatatypeProperty ;
+    rdfs:domain :地市 ;
+    rdfs:range xsd:string ;
+    rdfs:label "地市名" .
+
+:belongsTo a owl:ObjectProperty ;
+    rdfs:domain :地市 ;
+    rdfs:range :省份 ;
+    rdfs:label "隶属省份" .
+
+:指标值 a owl:DatatypeProperty ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "指标值（万元）" .
+
+:占比 a owl:DatatypeProperty ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "占比（%）" .
+
+:基础类收入 a owl:DatatypeProperty ;
+    rdfs:domain :地市 ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "基础类收入（万元）" .
+
+:基础类同比 a owl:DatatypeProperty ;
+    rdfs:domain :地市 ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "基础类收入同比（%）" .
+
+:基础类环比 a owl:DatatypeProperty ;
+    rdfs:domain :地市 ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "基础类收入环比（%）" .
+
+:基础类拉动占比 a owl:DatatypeProperty ;
+    rdfs:domain :地市 ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "基础类拉动占比（%）" .
+
+:规则内容 a owl:DatatypeProperty ;
+    rdfs:range xsd:string ;
+    rdfs:label "规则内容" .
+
+# ==================== 指标口径实例 ====================
+# 注意：指标值/占比为"示例占位"（演示推理用），非真实经营数据。
+:核心平台收入 a :指标口径 ;
+    rdfs:label "核心平台收入" ;
+    :指标值 10000 ;
+    :占比 100.0 .
+
+:基础类收入口径 a :指标口径 ;
+    rdfs:label "基础类收入" ;
+    :指标值 7300 ;
+    :占比 73.0 .
+
+:政企类收入口径 a :指标口径 ;
+    rdfs:label "政企类收入" ;
+    :指标值 2700 ;
+    :占比 27.0 .
+
+# ==================== 铁律实例（真实口径，来自账期更新工作流程） ====================
+:铁律1 a :铁律 ;
+    rdfs:label "累计-当月差值不变" ;
+    :规则内容 "账期校验铁律：累计-当月差值应与上一账期一致，不一致=OCR误读，须复核" .
+
+:铁律2 a :铁律 ;
+    rdfs:label "人数固定" ;
+    :规则内容 "账期校验铁律：人数固定（如0831=89人，五部门人数合计不变）" .
+
+:铁律3 a :铁律 ;
+    rdfs:label "数据不回退" ;
+    :规则内容 "账期校验铁律：当月/累计只允许增或持平，不得回退" .
+
+:铁律4 a :铁律 ;
+    rdfs:label "地市顺序固定" ;
+    :规则内容 "18地市固定顺序：郑州→周口→驻马店→洛阳→商丘→南阳→平顶山→信阳→开封→许昌→焦作→新乡→安阳→濮阳→漯河→三门峡→鹤壁→济源" .
+
+# ==================== 实例：18地市（顺序固定；数值为示例占位，须从报表注入真实值） ====================
+:郑州 a :地市 ; :cityName "郑州" ; :基础类收入 1200 ; :基础类同比 3.2 ; :基础类环比 0.8 ; :基础类拉动占比 15.0 .
+:周口 a :地市 ; :cityName "周口" ; :基础类收入 680 ; :基础类同比 2.1 ; :基础类环比 0.5 ; :基础类拉动占比 8.5 .
+:驻马店 a :地市 ; :cityName "驻马店" ; :基础类收入 520 ; :基础类同比 1.5 ; :基础类环比 0.3 ; :基础类拉动占比 6.5 .
+:洛阳 a :地市 ; :cityName "洛阳" ; :基础类收入 880 ; :基础类同比 2.8 ; :基础类环比 0.6 ; :基础类拉动占比 11.0 .
+:商丘 a :地市 ; :cityName "商丘" ; :基础类收入 460 ; :基础类同比 1.2 ; :基础类环比 0.2 ; :基础类拉动占比 5.8 .
+:南阳 a :地市 ; :cityName "南阳" ; :基础类收入 720 ; :基础类同比 1.8 ; :基础类环比 0.4 ; :基础类拉动占比 9.0 .
+:平顶山 a :地市 ; :cityName "平顶山" ; :基础类收入 380 ; :基础类同比 0.9 ; :基础类环比 0.1 ; :基础类拉动占比 4.8 .
+:信阳 a :地市 ; :cityName "信阳" ; :基础类收入 350 ; :基础类同比 0.7 ; :基础类环比 0.1 ; :基础类拉动占比 4.4 .
+:开封 a :地市 ; :cityName "开封" ; :基础类收入 330 ; :基础类同比 0.6 ; :基础类环比 0.2 ; :基础类拉动占比 4.1 .
+:许昌 a :地市 ; :cityName "许昌" ; :基础类收入 310 ; :基础类同比 0.5 ; :基础类环比 0.1 ; :基础类拉动占比 3.9 .
+:焦作 a :地市 ; :cityName "焦作" ; :基础类收入 290 ; :基础类同比 0.4 ; :基础类环比 0.1 ; :基础类拉动占比 3.6 .
+:新乡 a :地市 ; :cityName "新乡" ; :基础类收入 400 ; :基础类同比 1.0 ; :基础类环比 0.3 ; :基础类拉动占比 5.0 .
+:安阳 a :地市 ; :cityName "安阳" ; :基础类收入 270 ; :基础类同比 0.3 ; :基础类环比 0.1 ; :基础类拉动占比 3.4 .
+:濮阳 a :地市 ; :cityName "濮阳" ; :基础类收入 240 ; :基础类同比 0.2 ; :基础类环比 0.1 ; :基础类拉动占比 3.0 .
+:漯河 a :地市 ; :cityName "漯河" ; :基础类收入 220 ; :基础类同比 0.1 ; :基础类环比 0.1 ; :基础类拉动占比 2.8 .
+:三门峡 a :地市 ; :cityName "三门峡" ; :基础类收入 200 ; :基础类同比 0.0 ; :基础类环比 0.0 ; :基础类拉动占比 2.5 .
+:鹤壁 a :地市 ; :cityName "鹤壁" ; :基础类收入 180 ; :基础类同比 -0.2 ; :基础类环比 0.0 ; :基础类拉动占比 2.3 .
+:济源 a :地市 ; :cityName "济源" ; :基础类收入 150 ; :基础类同比 -0.5 ; :基础类环比 0.0 ; :基础类拉动占比 1.9 .

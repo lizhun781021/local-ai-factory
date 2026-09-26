@@ -1,0 +1,174 @@
+@prefix t: <http://www.example.org/tele#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# ==================== 本体头 ====================
+<http://www.example.org/tele> a owl:Ontology ;
+    rdfs:label "套餐与资格判定本体" ;
+    rdfs:comment "双底座融合礼包5档 + 云商宽4档 + FTTR资格判定规则。数据源：河南标准化赋能工具 package-policies.md。作者：李准的星小辰（2026-09-26）" .
+
+# ==================== 类 ====================
+t:客户 a owl:Class ;
+    rdfs:label "客户" .
+
+t:套餐 a owl:Class ;
+    rdfs:label "套餐" .
+
+t:融合套餐 a owl:Class ;
+    rdfs:subClassOf t:套餐 ;
+    rdfs:label "融合套餐（双底座礼包）" .
+
+t:云商宽套餐 a owl:Class ;
+    rdfs:subClassOf t:套餐 ;
+    rdfs:label "云商宽套餐（政企产品）" .
+
+t:FTTR套餐 a owl:Class ;
+    rdfs:subClassOf t:套餐 ;
+    rdfs:label "FTTR套餐" .
+
+t:普通套餐 a owl:Class ;
+    rdfs:subClassOf t:套餐 ;
+    rdfs:label "普通套餐" .
+
+# ==================== 对象属性 ====================
+t:hasPackage a owl:ObjectProperty ;
+    rdfs:domain t:客户 ;
+    rdfs:range t:套餐 ;
+    rdfs:label "持有套餐" .
+
+t:hasScene a owl:ObjectProperty ;
+    rdfs:domain t:套餐 ;
+    rdfs:label "礼包场景" .
+
+# ==================== 数据属性 ====================
+t:hasName a owl:DatatypeProperty ;
+    rdfs:domain t:客户 ;
+    rdfs:range xsd:string ;
+    rdfs:label "客户名" .
+
+t:monthlyFee a owl:DatatypeProperty ;
+    rdfs:domain t:套餐 ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "月费（元）" .
+
+t:voiceMin a owl:DatatypeProperty ;
+    rdfs:domain t:套餐 ;
+    rdfs:range xsd:integer ;
+    rdfs:label "语音（分钟）" .
+
+t:dataGB a owl:DatatypeProperty ;
+    rdfs:domain t:套餐 ;
+    rdfs:range xsd:integer ;
+    rdfs:label "流量（GB）" .
+
+t:broadband a owl:DatatypeProperty ;
+    rdfs:domain t:套餐 ;
+    rdfs:range xsd:integer ;
+    rdfs:label "宽带（M）" .
+
+t:familyCard a owl:DatatypeProperty ;
+    rdfs:domain t:套餐 ;
+    rdfs:range xsd:integer ;
+    rdfs:label "家庭卡（张）" .
+
+t:packageTier a owl:DatatypeProperty ;
+    rdfs:domain t:套餐 ;
+    rdfs:range xsd:string ;
+    rdfs:label "档位标识" .
+
+# ==================== 公理 ====================
+t:FTTR套餐 owl:disjointWith t:普通套餐 .
+
+# ==================== 实例：双底座融合礼包（数据源 package-policies.md） ====================
+t:套餐99 a t:融合套餐 ;
+    t:packageTier "99元档" ;
+    t:monthlyFee 99 ;
+    t:voiceMin 600 ;
+    t:dataGB 65 ;
+    t:broadband 500 ;
+    t:familyCard 2 ;
+    t:hasScene "两路天翼视联 / 10元千兆权益+1路视联" .
+
+t:套餐119 a t:融合套餐 ;
+    t:packageTier "119元档" ;
+    t:monthlyFee 119 ;
+    t:voiceMin 1000 ;
+    t:dataGB 110 ;
+    t:broadband 1000 ;
+    t:familyCard 3 ;
+    t:hasScene "全光FTTR+套餐权益10元+1路视联（含FTTR网关）" .
+
+t:套餐139 a t:融合套餐 ;
+    t:packageTier "139元档" ;
+    t:monthlyFee 139 ;
+    t:voiceMin 1500 ;
+    t:dataGB 160 ;
+    t:broadband 1000 ;
+    t:familyCard 4 ;
+    t:hasScene "全光FTTR+天翼智屏 / 两路视联 / 终端直降1000" .
+
+t:套餐169 a t:融合套餐 ;
+    t:packageTier "169元档" ;
+    t:monthlyFee 169 ;
+    t:voiceMin 2000 ;
+    t:dataGB 210 ;
+    t:broadband 1000 ;
+    t:familyCard 4 ;
+    t:hasScene "全光FTTR+天翼智屏 / 两路视联 / 终端直降1100" .
+
+t:套餐199 a t:融合套餐 ;
+    t:packageTier "199元档" ;
+    t:monthlyFee 199 ;
+    t:voiceMin 2000 ;
+    t:dataGB 260 ;
+    t:broadband 2000 ;
+    t:familyCard 4 ;
+    t:hasScene "全光FTTR+天翼智屏 / 两路视联 / 终端直降1700 / 套餐权益30" .
+
+# ==================== 实例：云商宽（政企产品，数据源 package-policies.md） ====================
+t:云商宽299 a t:云商宽套餐 ;
+    t:packageTier "299元档" ;
+    t:monthlyFee 299 ;
+    t:voiceMin 2500 ;
+    t:dataGB 150 ;
+    t:broadband 1000 ;
+    t:hasScene "200M上行/1000M下行，FTTR-B提速350M/1500M" .
+
+t:云商宽399 a t:云商宽套餐 ;
+    t:packageTier "399元档" ;
+    t:monthlyFee 399 ;
+    t:voiceMin 3000 ;
+    t:dataGB 200 ;
+    t:broadband 1000 ;
+    t:hasScene "300M上行/1000M下行，FTTR-B提速450M/2000M" .
+
+t:云商宽599 a t:云商宽套餐 ;
+    t:packageTier "599元档" ;
+    t:monthlyFee 599 ;
+    t:voiceMin 5000 ;
+    t:dataGB 300 ;
+    t:broadband 1000 ;
+    t:hasScene "400M上行/1000M下行，FTTR-B提速550M/2000M" .
+
+t:云商宽999 a t:云商宽套餐 ;
+    t:packageTier "999元档" ;
+    t:monthlyFee 999 ;
+    t:voiceMin 10000 ;
+    t:dataGB 500 ;
+    t:broadband 1000 ;
+    t:hasScene "500M上行/1000M下行，FTTR-B提速650M/2000M" .
+
+# ==================== 实例：客户（演示数据，可替换为真实客户档案） ====================
+t:张三 a t:客户 ;
+    t:hasName "张三" ;
+    t:hasPackage t:套餐199 .
+
+t:李四 a t:客户 ;
+    t:hasName "李四" ;
+    t:hasPackage t:套餐99 .
+
+t:王五 a t:客户 ;
+    t:hasName "王五" ;
+    t:hasPackage t:套餐139 .

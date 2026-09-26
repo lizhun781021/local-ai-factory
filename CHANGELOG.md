@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '6e9f1c0f-4b40-4b59-8ba7-3fcc70e2f9cd'
-  PropagateID: '6e9f1c0f-4b40-4b59-8ba7-3fcc70e2f9cd'
-  ReservedCode1: '7f50261f-a64b-46ea-b311-8fab71c8d1ee'
-  ReservedCode2: '7f50261f-a64b-46ea-b311-8fab71c8d1ee'
+  ProduceID: '510162e1-a3fe-4af2-a251-7f7afda362be'
+  PropagateID: '510162e1-a3fe-4af2-a251-7f7afda362be'
+  ReservedCode1: '438d8a58-42fb-4465-beee-58f4b08bd3c5'
+  ReservedCode2: '438d8a58-42fb-4465-beee-58f4b08bd3c5'
 ---
 
 # 📋 更新日志
@@ -16,6 +16,22 @@ AIGC:
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 版本标签格式：`v{版本号}`
+
+---
+
+## [2.4.0] - 2026-09-26
+
+### 🧬 智能问答新增"本体推理"能力（Palantir Ontology 架构本地版）
+
+- 新增 `ontology/` 本体模块：`ontology_tool.py` 本体引擎（加载 TTL → OWL RL 推理 → SPARQL 查询 → 结构化结果），参考 Palantir Ontology 的"显式领域建模 + 推理机 + LLM 调度"架构
+- 三个业务本体（TTL）：
+  - `package-eligibility.ttl` 套餐与资格判定（双底座 99~199 五档 + 云商宽 299~999 四档 + FTTR 资格规则，数据源：河南标准化赋能 package-policies.md）
+  - `income-indicators.ttl` 收入指标体系（指标口径、18 地市固定层级、账期四铁律；数值为示例占位，严禁冒充真实经营数据）
+  - `marketing-scripts.ttl` 营销话术体系（客户类型→场景→主推产品、异议应对话术、五步法、5 地市差异化）
+- webui.py 智能问答页新增第 5 个 Tab「🧬 本体推理」：12 条注册规则速查、本体概览（类/属性/实例统计）、示例数据警示、未命中自动提示走 RAG
+- 意图路由设计：规则/关系类问题走本体（确定性、可溯源），开放类问题仍走 RAGFlow（原有流程不受影响）
+- 测试：`ontology/tests/test_ontology_tool.py` 16 项全过（含误命中回归：地市+指标类问题不再被本体规则劫持）
+- 已知边界：收入本体数值为示例占位，真实数据须从报表/数据库注入；参数化查询（指定地市/指标）需后续接入 LLM 参数提取
 
 ---
 

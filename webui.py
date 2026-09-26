@@ -42,6 +42,18 @@ _load_dotenv()
 # ---- 模型 API 服务层（独立模块，见 factory_api.py）----
 from factory_api import *  # noqa: E402,F401
 
+# ---- 本体引擎（智能问答：规则类问题确定性推理）----
+try:
+    _ont_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ontology")
+    if _ont_dir not in sys.path:
+        sys.path.insert(0, _ont_dir)
+    from ontology_tool import ONTOLOGIES, RULES, answer as ontology_answer, run_rule as ontology_run_rule, ontology_summary  # noqa: E402
+    ONTOLOGY_READY = True
+    ONTOLOGY_IMPORT_ERROR = ""
+except Exception as _oe:
+    ONTOLOGY_READY = False
+    ONTOLOGY_IMPORT_ERROR = str(_oe)
+
 # ==================== 配置 ====================
 LLM_API_URL = "http://localhost:8082"
 LLM_PROXY_URL = "http://localhost:8088"  # OpenAI兼容代理（含NewApi/云端模型）
@@ -2955,7 +2967,7 @@ elif page == "📚 智能问答":
     # RAGFlow 使用 API Key 认证
     ragflow_headers = {"Authorization": f"Bearer {RAGFLOW_API_KEY}"}
 
-    tab0, tab1, tab2, tab3 = st.tabs(["💬 智能问答", "🔍 语义搜索 (RAGFlow)", "📁 本地全文搜索 (FTS5)", "📋 文档列表"])
+    tab0, tab1, tab2, tab3, tab4 = st.tabs(["💬 智能问答", "🔍 语义搜索 (RAGFlow)", "📁 本地全文搜索 (FTS5)", "📋 文档列表", "🧬 本体推理"])
 
     with tab0:
         st.subheader("智能问答")
@@ -3699,6 +3711,83 @@ elif page == "📚 智能问答":
                     st.info("暂无文档")
             except Exception as e:
                 st.error(f"获取文档列表失败: {str(e)}")
+
+    with tab4:
+        st.subheader("🧬 本体推理")
+        st.caption("规则/关系类问题走本体（确定性推理），开放类问题走 RAG —— Palantir Ontology 架构本地版")
+
+        if not ONTOLOGY_READY:
+            st.error(f"本体引擎加载失败: {ONTOLOGY_IMPORT_ERROR}")
+        else:
+            col_a1, col_a2 = st.columns([2, 1])
+            with col_a1:
+                selected_oid = st.selectbox(
+                    "选择本体",
+                    list(ONTOLOGIES.keys()),
+                    format_func=lambda o: ONTOLOGIES[o]["label"],
+                    key="ontology_select",
+                )
+            with col_a2:
+                st.caption("")
+                st.caption(ONTOLOGIES[selected_oid]["desc"])
+
+            # 本体概览
+            with st.expander("📊 本体概览（类/属性/实例）", expanded=False):
+                try:
+                    _sum = ontology_summary(selected_oid)
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("三元组", _sum["triples"])
+                    c2.metric("类", len(_sum["classes"]))
+                    c3.metric("属性", len(_sum["properties"]))
+                    c4.metric("实例", _sum["individual_count"])
+                    with st.expander("类列表"):
+                        st.write("、".join(_sum["classes"]) or "—")
+                    with st.expander("属性列表"):
+                        st.write("、".join(_sum["properties"]) or "—")
+                    with st.expander("实例列表"):
+                        st.write("、".join(_sum["individuals"]) or "—")
+                except Exception as _e:
+                    st.error(f"本体概览失败: {_e}")
+
+            # 问题输入
+            onto_query = st.text_input(
+                "提问",
+                placeholder="例：张三能不能升FTTR？/ 双底座套餐有哪些档？/ 客户说没时间怎么处理？",
+                key="ontology_query",
+            )
+            ask_onto = st.button("🧬 本体推理", type="primary", key="ontology_ask", use_container_width=True)
+
+            if ask_onto and onto_query:
+                _res = ontology_answer(onto_query)
+                try:
+                    log_activity("本体推理", f"问题={onto_query[:50]} | 命中={_res['matched']}")
+                except Exception:
+                    pass
+                if not _res["matched"]:
+                    st.warning(f"未命中本体规则：{_res['hint']}。可以切到「💬 智能问答」用 RAGFlow 检索文档。")
+                else:
+                    for _ans in _res["answers"]:
+                        st.markdown(f"### 🧬 {_ans['ontology_label']} · {_ans['rule_id']}")
+                        st.caption(_ans["desc"])
+                        if _ans.get("demo"):
+                            st.warning("⚠️ 当前为示例演示数据（非真实经营数据），真实数据请走「💬 智能问答」RAG 检索")
+                        _rows = _ans["rows"]
+                        if not _rows:
+                            st.info("该规则未查到数据")
+                        elif "__error__" in _rows[0]:
+                            st.error(f"查询失败: {_rows[0]['__error__']}")
+                        else:
+                            _headers = list(_rows[0].keys())
+                            _md = "| " + " | ".join(_headers) + " |\n| " + " | ".join(["---"] * len(_headers)) + " |\n"
+                            for _r in _rows[:50]:
+                                _md += "| " + " | ".join(str(_r.get(_h, "")) for _h in _headers) + " |\n"
+                            st.markdown(_md)
+                        st.caption(f"共 {_ans['count']} 行 · 规则确定性结果，可溯源")
+
+            # 规则速查
+            with st.expander("📜 已注册规则速查", expanded=False):
+                for _r in RULES:
+                    st.markdown(f"- `{_r['id']}`（{ONTOLOGIES[_r['ontology']]['label']}）— {_r['desc']}")
 
 
 # ==================== Token 统计页 ====================
